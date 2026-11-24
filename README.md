@@ -14,11 +14,12 @@ coturn, unchanged.
 
 ## Status
 
-**M0 complete — scaffold, protocol/crypto, server CLI, baseline, UI and media gates.** The
-workspace builds and tests green. The WebSocket server is M1; the desktop shell is M2; the media
-spike is M3. FerroUI passed the toolkit gate: Direct2D on Windows, Skia on Android. The M3
-pre-work also proves live 720p frames through Direct2D at 3% of one core with zero CPU readbacks;
-see `spikes/ferroui-texture/`.
+**M1 complete — WebSocket control plane.** The server speaks WSS with a self-signed
+certificate, SCRAM-SHA-256 authentication, rooms/presence/chat, opaque WebRTC signaling and file
+metadata relay, TURN credentials and client-room persistence. The workspace builds and tests
+green (49 tests, including five real WebSocket clients). Next is M2, the desktop shell; then M3
+media. FerroUI passed the toolkit gate (Direct2D on Windows, Skia on Android), and the M3 texture
+pre-work proves live 720p frames through Direct2D at 3% of one core with zero CPU readbacks.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.

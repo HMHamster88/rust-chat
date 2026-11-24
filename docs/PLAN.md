@@ -12,8 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M0 complete (scaffold, protocol/crypto foundations, server CLI, baseline, UI and
-  media gates). Next: M1, the WebSocket server.
+- **Status:** M1 complete (WSS control plane: SCRAM auth, TLS, rooms, presence, chat, signaling,
+  file relay, TURN). Next: M2, the desktop shell. The M0 UI/media gates and the M3 texture
+  pre-work are recorded in §11/§12.
 
 ---
 
@@ -273,7 +274,7 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 
 ---
 
-## 12. M0 results
+## 12. Milestone results
 
 | Item | Result |
 |---|---|
@@ -285,3 +286,22 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 | Docs | `PLAN.md`, `PROTOCOL.md`, `BASELINE.md`, this file |
 | FerroUI gate | builds on Windows (Skia needs the documented LLVM/libclang prerequisite; Direct2D needs only MSVC). 5,000-item list: **133.3 MB** working set on Direct2D, **152.3 MB** on Skia; 50,000 items cost +8 MB, so the list virtualizes. Idle CPU ~0%. Android: builds with `cargo ndk`, **51.4 MB APK** after stripping, installs and runs on the TECNO; 5,000-item list virtualizes (10–16 realized items); IME connects and Back hides it; rotation works; **175–186 MB PSS** on a fresh launch |
 | Media gate | **passed**: two `webrtc-rs` peers connect over loopback and a data-channel payload arrives intact; see `spikes/webrtc-loopback/README.md` |
+
+### M1 — WebSocket control plane (2026-11-25)
+
+- WSS (rustls/ring) with the certificate from `init` and a `/healthz` endpoint; TLS can be turned
+  off for LAN development. Verified with `curl -k` and a Node WSS client (`hello → challenge`,
+  Argon2id `m=65536`).
+- SCRAM-SHA-256 handshake against the verifier; failed attempts are gated per IP (3/min → 30 s
+  lockout, successful logins do not consume attempts); duplicate names get ` (2)`; the
+  `serverSignature` proves the shared password to the client.
+- Rooms: config rooms plus client-created rooms persisted in `rooms.json`, an implicit lobby, the
+  voice cap, create/delete rules, authoritative `room.state` snapshots and deltas, and
+  `room.flags`.
+- Chat, presence, opaque `rtc.signal` relay (same room only), file metadata relay, ping/pong and
+  `server.shutdown`.
+- Per-session token buckets (chat 5/s, signaling 50/s, offers 20/min), bounded outbound queues;
+  a slow consumer is closed instead of growing memory.
+- Tests: 17 server unit tests + 5 real WebSocket integration tests (wrong password, two clients
+  chatting, signal relay and bad target, room create/join/leave/delete, `no-auto-room`), 49
+  workspace tests total; `clippy -D warnings` clean.

@@ -4,6 +4,8 @@
 //! proven semantics (rooms, SCRAM, opaque SDP relay) and drops the legacy capability dance.
 //! See `docs/PROTOCOL.md`.
 
+pub mod payloads;
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -146,7 +148,7 @@ pub struct Member {
     #[serde(default)]
     pub sharing: bool,
     #[serde(default)]
-    pub capabilities: Vec<String>,
+    pub features: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -316,7 +318,7 @@ mod tests {
             self_mute: false,
             self_deaf: false,
             sharing: false,
-            capabilities: Vec::new(),
+            features: Vec::new(),
         };
         let state = RoomState {
             room: RoomInfo {

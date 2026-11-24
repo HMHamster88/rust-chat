@@ -4,6 +4,8 @@ use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
 use rust_chat_crypto::{PasswordVerifier, certificate_fingerprint, load_verifier, save_verifier};
 use rust_chat_server::DEFAULT_CONFIG_PATH;
 use rust_chat_server::config::{ServerConfig, TlsConfig};
+use rust_chat_server::server;
+use rust_chat_server::state::Shared;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
@@ -40,14 +42,15 @@ enum Command {
         #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
-    /// Run the server (implemented in M1).
+    /// Run the WebSocket control plane.
     Serve {
         #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
     },
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -62,7 +65,7 @@ fn main() -> anyhow::Result<()> {
         Command::Init { config, password } => init(&config, password),
         Command::HashPassword { config, password } => hash_password(&config, password),
         Command::Fingerprint { config } => print_fingerprint(&config),
-        Command::Serve { config } => serve(&config),
+        Command::Serve { config } => serve(&config).await,
     }
 }
 
@@ -121,21 +124,11 @@ fn print_fingerprint(config_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn serve(config_path: &Path) -> anyhow::Result<()> {
+async fn serve(config_path: &Path) -> anyhow::Result<()> {
     let config = ServerConfig::load(config_path)?;
     let verifier = load_verifier(Path::new(&config.verifier_file))?;
-    let _ = &verifier.stored_key;
-
-    println!(
-        "rust-chat-server '{}' config loaded ({}, {} rooms); WebSocket runtime lands in M1",
-        config.server_name,
-        config.port,
-        config.rooms.len()
-    );
-    bail!(
-        "`serve` is not implemented yet (M1). Config and verifier at {} loaded successfully.",
-        config_path.display()
-    )
+    let shared = Shared::new(config, verifier)?;
+    server::run(shared).await
 }
 
 fn prompt_password(provided: Option<String>, prompt: &str) -> anyhow::Result<String> {
