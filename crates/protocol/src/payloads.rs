@@ -100,6 +100,8 @@ pub struct PresenceUpdate {
     pub self_deaf: Option<bool>,
     #[serde(default)]
     pub sharing: Option<bool>,
+    #[serde(default)]
+    pub voice: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -157,6 +159,8 @@ pub struct MemberUpdated {
     pub self_mute: bool,
     pub self_deaf: bool,
     pub sharing: bool,
+    #[serde(default)]
+    pub voice: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

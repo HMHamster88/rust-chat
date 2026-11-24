@@ -528,11 +528,15 @@ fn handle_presence(shared: &Arc<Shared>, session_id: &str, request: PresenceUpda
     if let Some(value) = request.sharing {
         session.sharing = value;
     }
+    if let Some(value) = request.voice {
+        session.voice = value;
+    }
     let update = MemberUpdated {
         session_id: session.id.clone(),
         self_mute: session.self_mute,
         self_deaf: session.self_deaf,
         sharing: session.sharing,
+        voice: session.voice,
     };
     state.broadcast_room(&room, payload_envelope(kind::MEMBER_UPDATED, &update), None);
 }

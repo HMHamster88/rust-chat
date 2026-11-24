@@ -34,17 +34,19 @@ async fn two_peers_exchange_opus_audio_both_ways() {
 
     let mut a_pcm = Vec::new();
     let mut b_pcm = Vec::new();
+    let mut a_received = a.take_received().expect("A receiver");
+    let mut b_received = b.take_received().expect("B receiver");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
-            frame = a.received.recv() => {
+            frame = a_received.recv() => {
                 if let Some(frame) = frame {
                     a_pcm.extend(frame);
                 } else {
                     break;
                 }
             }
-            frame = b.received.recv() => {
+            frame = b_received.recv() => {
                 if let Some(frame) = frame {
                     b_pcm.extend(frame);
                 } else {

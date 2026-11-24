@@ -48,6 +48,11 @@ pub enum Command {
         self_mute: Option<bool>,
         self_deaf: Option<bool>,
         sharing: Option<bool>,
+        voice: Option<bool>,
+    },
+    Signal {
+        to: String,
+        signal: serde_json::Value,
     },
     RefreshRooms,
     ForgetPin {
@@ -56,10 +61,18 @@ pub enum Command {
     },
 }
 
+/// An SDP/ICE payload forwarded by the server. The signal body stays opaque.
+#[derive(Debug, Clone)]
+pub struct IncomingSignal {
+    pub from: String,
+    pub signal: serde_json::Value,
+}
+
 #[derive(Clone)]
 pub struct ClientHandle {
     snapshot: watch::Receiver<ChatSnapshot>,
     commands: mpsc::Sender<Command>,
+    signals: tokio::sync::broadcast::Sender<IncomingSignal>,
 }
 
 impl ClientHandle {
@@ -75,10 +88,12 @@ impl ClientHandle {
     ) -> Self {
         let (commands_tx, commands_rx) = mpsc::channel(64);
         let (snapshot_tx, snapshot_rx) = watch::channel(ChatSnapshot::default());
+        let (signal_tx, _) = tokio::sync::broadcast::channel(64);
         let task = ClientTask {
             settings,
             snapshot_tx,
             commands: commands_rx,
+            signals: signal_tx.clone(),
             pins: PinStore::at(root.join("pins.json")),
             history: HistoryStore::at(root.clone()),
             settings_store: SettingsStore::at(root.join("settings.json")),
@@ -87,11 +102,18 @@ impl ClientHandle {
         Self {
             snapshot: snapshot_rx,
             commands: commands_tx,
+            signals: signal_tx,
         }
     }
 
     pub fn snapshot(&self) -> ChatSnapshot {
         self.snapshot.borrow().clone()
+    }
+
+    /// Subscribes to forwarded WebRTC signals (offer/answer/ICE). Every call gets a
+    /// fresh receiver, so leaving and rejoining a voice room works.
+    pub fn subscribe_signals(&self) -> tokio::sync::broadcast::Receiver<IncomingSignal> {
+        self.signals.subscribe()
     }
 
     pub fn connect(&self, request: ConnectRequest) -> bool {
@@ -128,6 +150,25 @@ impl ClientHandle {
             self_mute,
             self_deaf,
             sharing,
+            voice: None,
+        })
+    }
+
+    /// Announces that this client is (or is no longer) in the room's voice mesh.
+    pub fn set_voice(&self, voice: bool) -> bool {
+        self.send(Command::Presence {
+            self_mute: None,
+            self_deaf: None,
+            sharing: None,
+            voice: Some(voice),
+        })
+    }
+
+    /// Sends one opaque offer/answer/ICE body to a member of the current room.
+    pub fn send_signal(&self, to: impl Into<String>, signal: serde_json::Value) -> bool {
+        self.send(Command::Signal {
+            to: to.into(),
+            signal,
         })
     }
 
@@ -151,6 +192,7 @@ struct ClientTask {
     settings: ClientSettings,
     snapshot_tx: watch::Sender<ChatSnapshot>,
     commands: mpsc::Receiver<Command>,
+    signals: tokio::sync::broadcast::Sender<IncomingSignal>,
     pins: PinStore,
     history: HistoryStore,
     settings_store: SettingsStore,
@@ -521,12 +563,23 @@ impl ClientTask {
                             return End::Reconnect(error.to_string());
                         }
                     }
-                    Some(Command::Presence { self_mute, self_deaf, sharing }) => {
+                    Some(Command::Presence { self_mute, self_deaf, sharing, voice }) => {
                         if let Err(error) = send(
                             &mut session.socket,
                             Envelope::new(
                                 kind::PRESENCE_UPDATE,
-                                serde_json::to_value(PresenceUpdate { self_mute, self_deaf, sharing }).unwrap(),
+                                serde_json::to_value(PresenceUpdate { self_mute, self_deaf, sharing, voice }).unwrap(),
+                            ),
+                        ).await {
+                            return End::Reconnect(error.to_string());
+                        }
+                    }
+                    Some(Command::Signal { to, signal }) => {
+                        if let Err(error) = send(
+                            &mut session.socket,
+                            Envelope::new(
+                                kind::RTC_SIGNAL,
+                                serde_json::to_value(RtcSignal { to, signal }).unwrap(),
                             ),
                         ).await {
                             return End::Reconnect(error.to_string());
@@ -661,7 +714,16 @@ impl ClientTask {
                         member.self_mute = update.self_mute;
                         member.self_deaf = update.self_deaf;
                         member.sharing = update.sharing;
+                        member.voice = update.voice;
                     }
+                });
+                None
+            }
+            kind::RTC_SIGNAL => {
+                let forward: RtcSignalForward = serde_json::from_value(envelope.payload).ok()?;
+                let _ = self.signals.send(IncomingSignal {
+                    from: forward.from,
+                    signal: forward.signal,
                 });
                 None
             }

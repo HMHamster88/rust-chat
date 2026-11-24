@@ -106,7 +106,7 @@ pub struct VoicePeer {
     gathered: mpsc::UnboundedReceiver<()>,
     connected: Arc<AtomicBool>,
     /// Decoded 48 kHz mono frames from the remote peer.
-    pub received: mpsc::UnboundedReceiver<Vec<i16>>,
+    pub received: Option<mpsc::UnboundedReceiver<Vec<i16>>>,
     configured_ssrc: u32,
     ssrc: u32,
     payload_type: u8,
@@ -186,7 +186,7 @@ impl VoicePeer {
             encoder: OpusEncoder::new()?,
             gathered: gathered_rx,
             connected,
-            received: pcm_rx,
+            received: Some(pcm_rx),
             configured_ssrc,
             ssrc: configured_ssrc,
             payload_type: OPUS_PAYLOAD_TYPE,
@@ -195,6 +195,12 @@ impl VoicePeer {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    /// Moves the decoded-frame receiver out so a peer task can select on it while
+    /// still calling `send_pcm` on the connection.
+    pub fn take_received(&mut self) -> Option<mpsc::UnboundedReceiver<Vec<i16>>> {
+        self.received.take()
     }
 
     pub async fn wait_connected(&self, timeout: Duration) -> Result<(), VoiceError> {

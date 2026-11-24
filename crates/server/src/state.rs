@@ -63,6 +63,7 @@ pub struct Session {
     pub self_mute: bool,
     pub self_deaf: bool,
     pub sharing: bool,
+    pub voice: bool,
     pub tx: mpsc::Sender<Envelope>,
     pub close: Arc<Notify>,
     pub chat: Bucket,
@@ -89,6 +90,7 @@ impl Session {
             self_mute: false,
             self_deaf: false,
             sharing: false,
+            voice: false,
             tx,
             close,
             chat: Bucket::new(10.0, 5.0),
@@ -106,6 +108,7 @@ impl Session {
             self_mute: self.self_mute,
             self_deaf: self.self_deaf,
             sharing: self.sharing,
+            voice: self.voice,
             features: self.features.clone(),
         }
     }

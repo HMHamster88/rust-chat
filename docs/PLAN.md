@@ -12,9 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M2 core complete (desktop shell: TOFU pinning, SCRAM, rooms, chat, history,
-  keyring). Next: M3, voice and screen media. M0/M1 results and the M3 texture pre-work are in
-  §11/§12; the settings-screen and update-check polish remain.
+- **Status:** M3 voice complete (mesh Opus with APM echo cancellation, jitter buffer, voice UI).
+  Next: VP8 screen sharing, then the mesh polish of M4. M0/M1/M2 results and the M3 texture
+  pre-work are in §11/§12; the settings screen, update checker and device pickers remain.
 
 ---
 
@@ -324,3 +324,24 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   room (the Kotlin client: 408–420 MB / ~9%).
 - Remaining M2 polish (not gating): a full settings screen, theme/density, update checker,
   room create/delete/leave controls in the UI, and audio-device selection (M3).
+
+### M3 — voice (2026-11-25)
+
+- `crates/media`: Opus 48 kHz mono at 32 kbps (complexity 5), a reordering jitter buffer with a
+  bounded gap, and a `VoicePeer` that wraps one `webrtc-rs` connection with an audio track plus a
+  host-candidate SDP offer/answer. SSRC and payload type are read back after negotiation.
+- `crates/media-desktop`: cpal/WASAPI capture and playout with format/sample-rate conversion,
+  shared 10 ms APM frames, and a 1 s playout queue. **Sonora 0.3**, the pure-Rust port of WebRTC
+  APM, supplies AEC3, noise suppression and AGC2 without a C++/meson toolchain.
+- `crates/app-desktop`: one peer per member with `voice = true`; deterministic offerer (smaller
+  session id offers, the other answers) removes glare. Muted on join; mic/speaker mute and live
+  levels; per-member `[voice]` and `♪` markers. SDP carries host candidates inline, so no
+  trickle ICE is needed on a LAN.
+- Protocol: `Member`/`PresenceUpdate`/`MemberUpdated` carry a `voice` flag, so the mesh knows
+  exactly who is in the call without a second subscription.
+- Tests: a headless two-peer WebRTC test carries Opus both ways, and a full integration test
+  connects two SCRAM clients through the real server, relays the offer/answer, and receives
+  non-silent audio on both sides (0.5 s). The whole workspace test suite and
+  `clippy -D warnings` are clean.
+- Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
+  device pickers, TURN, and the 4-peer measurement.

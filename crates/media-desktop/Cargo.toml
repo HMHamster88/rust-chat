@@ -6,4 +6,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+cpal = "0.18.2"
 rust-chat-media = { path = "../media" }
+sonora = "0.3.0"
+thiserror = { workspace = true }
+tokio = { version = "1.54.1", features = ["sync", "rt", "time"] }

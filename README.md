@@ -14,11 +14,12 @@ coturn, unchanged.
 
 ## Status
 
-**M2 core complete — desktop shell.** The FerroUI/Direct2D client connects over WSS with TOFU
-pinning, SCRAM auth, rooms, members and chat; local history survives a restart, the password can
-live in the OS key store, and reconnect is automatic. Measured **98–99 MB** working set and under
-1% idle CPU (the Kotlin client was 408–420 MB and ~9%). Next is M3 media. Settings-screen polish,
-the update checker and audio devices remain for their milestones.
+**M3 voice complete — calls work end to end.** The FerroUI/Direct2D client joins a room's voice
+mesh with one WebRTC/Opus connection per member, echo cancellation/noise suppression/AGC from the
+pure-Rust Sonora port of WebRTC APM, a jitter buffer and automatic reconnection. Two real clients
+exchange audio through the server's signal relay in an integration test. **Screen sharing (VP8)**
+is next. Settings-screen polish, the update checker and device pickers remain for their
+milestones.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.
@@ -31,8 +32,8 @@ the feature specification, not a runtime peer.
 | `crates/crypto` | Argon2id verifier, SCRAM-SHA-256, fingerprints |
 | `crates/server` | Control plane (axum/rustls in M1) and the `rust-chat-server` CLI |
 | `crates/client-core` | State machine, reconnect, store, history, file transfer |
-| `crates/media` | Platform-independent media seam |
-| `crates/media-desktop` | cpal, windows-capture, SendInput, wgpu |
+| `crates/media` | Opus, jitter buffer, WebRTC voice peer, platform-independent media seam |
+| `crates/media-desktop` | cpal/WASAPI capture and playout, Sonora APM echo cancellation |
 | `crates/media-android` | AAudio, platform AEC, GLES/Vulkan |
 | `crates/ui` | Shared screens, widgets and theme |
 | `crates/app-desktop` | `rust-chat` binary |

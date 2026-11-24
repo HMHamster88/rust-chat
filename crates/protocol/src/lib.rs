@@ -148,6 +148,8 @@ pub struct Member {
     #[serde(default)]
     pub sharing: bool,
     #[serde(default)]
+    pub voice: bool,
+    #[serde(default)]
     pub features: Vec<String>,
 }
 
@@ -318,6 +320,7 @@ mod tests {
             self_mute: false,
             self_deaf: false,
             sharing: false,
+            voice: false,
             features: Vec::new(),
         };
         let state = RoomState {

@@ -18,6 +18,14 @@ pub struct OpusEncoder {
     inner: opus::Encoder,
 }
 
+// SAFETY: libopus requires one encoder instance to be used serially, not on a
+// particular thread. The owning voice task is the only user, so moving it between
+// worker threads is sound.
+unsafe impl Send for OpusEncoder {}
+// SAFETY: no method reads or mutates the libopus handle through `&self`, so a shared
+// reference may safely cross threads while the owning task keeps exclusive access.
+unsafe impl Sync for OpusEncoder {}
+
 impl OpusEncoder {
     pub fn new() -> Result<Self, AudioError> {
         let mut inner =
@@ -39,6 +47,11 @@ impl OpusEncoder {
 pub struct OpusDecoder {
     inner: opus::Decoder,
 }
+
+// SAFETY: same contract as `OpusEncoder`: one decoder instance, serialized use.
+unsafe impl Send for OpusDecoder {}
+// SAFETY: same contract as `OpusEncoder`.
+unsafe impl Sync for OpusDecoder {}
 
 impl OpusDecoder {
     pub fn new() -> Result<Self, AudioError> {

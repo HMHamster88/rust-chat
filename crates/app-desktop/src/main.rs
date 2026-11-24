@@ -1,6 +1,8 @@
-//! FerroUI desktop shell: connect/trust, rooms, chat and local history.
+//! FerroUI desktop shell: connect/trust, rooms, chat, local history and voice.
 
 #![cfg(windows)]
+
+use rust_chat_desktop::voice;
 
 use ferroui_base::collections::FerroList;
 use ferroui_base::layout::{HorizontalAlignment, Orientation, VerticalAlignment};
@@ -13,17 +15,21 @@ use ferroui_controls::{
 use ferroui_desktop::AppBuilderDesktopExtensions;
 use ferroui_themes_fluent::FluentTheme;
 use rust_chat_client_core::{
-    ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
+    ChatSnapshot, ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
 };
-use std::cell::RefCell;
+use rust_chat_media_desktop::audio::AudioIo;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use voice::{VoiceCommand, VoiceController, VoiceEvent};
 
 struct Startup {
     settings: ClientSettings,
     password: Option<String>,
     client: ClientHandle,
     memory: ConnectionMemory,
+    runtime: tokio::runtime::Handle,
 }
 
 thread_local! {
@@ -66,9 +72,21 @@ impl ApplicationImpl for App {
     }
 }
 
+struct VoiceRuntime {
+    audio: AudioIo,
+    controller: VoiceController,
+    mic_muted: Cell<bool>,
+    speaker_muted: Cell<bool>,
+    room: String,
+    /// Levels keyed by session id; the empty key is the local microphone.
+    levels: RefCell<HashMap<String, (f32, Instant)>>,
+    members_signature: RefCell<String>,
+}
+
 struct Ui {
     client: ClientHandle,
     memory: ConnectionMemory,
+    runtime: tokio::runtime::Handle,
     settings: RefCell<ClientSettings>,
     connect_panel: Ref<StackPanel>,
     room_panel: Ref<StackPanel>,
@@ -96,6 +114,14 @@ struct Ui {
     send: Ref<Button>,
     forget: Ref<Button>,
     disconnect: Ref<Button>,
+    join_voice: Ref<Button>,
+    leave_voice: Ref<Button>,
+    mute_mic: Ref<Button>,
+    mute_speaker: Ref<Button>,
+    voice_status: Ref<TextBlock>,
+    voice_note: RefCell<Option<String>>,
+    voice_line: RefCell<String>,
+    voice: RefCell<Option<VoiceRuntime>>,
 }
 
 impl Ui {
@@ -184,6 +210,102 @@ impl Ui {
             "Pinned key forgotten. Reconnect to approve the server again.",
         ));
     }
+
+    fn join_voice(self: &Rc<Self>) {
+        if self.voice.borrow().is_some() {
+            return;
+        }
+        let snapshot = self.client.snapshot();
+        let Some(room) = snapshot.room.as_ref() else {
+            return;
+        };
+        if !room.room.voice {
+            *self.voice_note.borrow_mut() = Some("this room is text-only".to_owned());
+            return;
+        }
+        let Some(self_id) = snapshot.self_id.clone() else {
+            return;
+        };
+        let (audio, handle) = match AudioIo::start(None, None) {
+            Ok(value) => value,
+            Err(error) => {
+                *self.voice_note.borrow_mut() = Some(format!("cannot start audio: {error}"));
+                return;
+            }
+        };
+        let controller = voice::start(self.client.clone(), self_id, handle, &self.runtime);
+        *self.voice.borrow_mut() = Some(VoiceRuntime {
+            audio,
+            controller,
+            mic_muted: Cell::new(true),
+            speaker_muted: Cell::new(false),
+            room: room.room.id.clone(),
+            levels: RefCell::new(HashMap::new()),
+            members_signature: RefCell::new(String::new()),
+        });
+        // Muted on join, like a push-to-talk call.
+        let _ = self.client.set_voice(true);
+        let _ = self.client.set_presence(Some(true), Some(false), None);
+        *self.voice_note.borrow_mut() = Some("joining (microphone muted)".to_owned());
+        refresh_voice(self, &snapshot);
+    }
+
+    fn leave_voice(&self, reason: Option<&str>) {
+        let taken = self.voice.borrow_mut().take();
+        if let Some(mut runtime) = taken {
+            runtime.controller.send(VoiceCommand::Stop);
+            runtime.audio.stop();
+            let _ = self.client.set_voice(false);
+            let _ = self.client.set_presence(Some(false), Some(false), None);
+            *self.voice_note.borrow_mut() = Some(reason.unwrap_or("off").to_owned());
+        }
+    }
+
+    fn toggle_mic(&self) {
+        let muted = {
+            let voice = self.voice.borrow();
+            let Some(runtime) = voice.as_ref() else {
+                return;
+            };
+            let muted = !runtime.mic_muted.get();
+            runtime.mic_muted.set(muted);
+            runtime.controller.send(VoiceCommand::MicMuted(muted));
+            muted
+        };
+        *self.voice_note.borrow_mut() = Some(if muted {
+            "microphone muted".to_owned()
+        } else {
+            "microphone live".to_owned()
+        });
+        self.mute_mic.set_content(Some(Rc::new(if muted {
+            "Unmute mic".to_owned()
+        } else {
+            "Mute mic".to_owned()
+        })));
+    }
+
+    fn toggle_speaker(&self) {
+        let muted = {
+            let voice = self.voice.borrow();
+            let Some(runtime) = voice.as_ref() else {
+                return;
+            };
+            let muted = !runtime.speaker_muted.get();
+            runtime.speaker_muted.set(muted);
+            runtime.controller.send(VoiceCommand::SpeakerMuted(muted));
+            muted
+        };
+        *self.voice_note.borrow_mut() = Some(if muted {
+            "speakers muted".to_owned()
+        } else {
+            "speakers live".to_owned()
+        });
+        self.mute_speaker.set_content(Some(Rc::new(if muted {
+            "Unmute speakers".to_owned()
+        } else {
+            "Mute speakers".to_owned()
+        })));
+    }
 }
 
 fn create_main_window() -> Ref<Window> {
@@ -267,6 +389,21 @@ fn create_main_window() -> Ref<Window> {
     let members = text("", 13.0);
     let rooms_panel = StackPanel::new();
     rooms_panel.set_spacing(4.0);
+    let join_voice = Button::new();
+    join_voice.set_content(Some(Rc::new("Join voice".to_string())));
+    let leave_voice = Button::new();
+    leave_voice.set_content(Some(Rc::new("Leave voice".to_string())));
+    let mute_mic = Button::new();
+    mute_mic.set_content(Some(Rc::new("Unmute mic".to_string())));
+    let mute_speaker = Button::new();
+    mute_speaker.set_content(Some(Rc::new("Mute speakers".to_string())));
+    let voice_status = text("voice: off", 13.0);
+    let voice_row = row();
+    voice_row.children().add(join_voice.clone());
+    voice_row.children().add(leave_voice.clone());
+    voice_row.children().add(mute_mic.clone());
+    voice_row.children().add(mute_speaker.clone());
+    voice_row.children().add(voice_status.clone());
     let message_model = Rc::new(FerroList::new());
     let message_list = ListBox::new();
     message_list.set_items_source(Some(ItemsSource::from(message_model.clone())));
@@ -291,6 +428,7 @@ fn create_main_window() -> Ref<Window> {
     room_header.children().add(room_status.clone());
     room_panel.children().add(room_header);
     room_panel.children().add(room_actions);
+    room_panel.children().add(voice_row);
     room_panel.children().add(text("ROOMS", 12.0));
     room_panel.children().add(rooms_panel.clone());
     room_panel.children().add(text("MEMBERS", 12.0));
@@ -309,6 +447,7 @@ fn create_main_window() -> Ref<Window> {
     let ui = Rc::new(Ui {
         client: startup.client,
         memory: startup.memory,
+        runtime: startup.runtime,
         settings: RefCell::new(settings.clone()),
         connect_panel,
         room_panel,
@@ -336,6 +475,14 @@ fn create_main_window() -> Ref<Window> {
         send,
         forget,
         disconnect,
+        join_voice,
+        leave_voice,
+        mute_mic,
+        mute_speaker,
+        voice_status,
+        voice_note: RefCell::new(None),
+        voice_line: RefCell::new(String::new()),
+        voice: RefCell::new(None),
     });
 
     wire(&ui);
@@ -368,7 +515,11 @@ fn create_main_window() -> Ref<Window> {
     window
         .closed({
             let client = ui.client.clone();
+            let weak = Rc::downgrade(&ui);
             move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.leave_voice(Some("voice: window closed"));
+                }
                 let _ = client.disconnect();
             }
         })
@@ -421,7 +572,40 @@ fn wire(ui: &Rc<Ui>) {
         let weak = Rc::downgrade(ui);
         move |_, _| {
             if let Some(ui) = weak.upgrade() {
+                ui.leave_voice(Some("voice: disconnected"));
                 let _ = ui.client.disconnect();
+            }
+        }
+    });
+    ui.join_voice.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.join_voice();
+            }
+        }
+    });
+    ui.leave_voice.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.leave_voice(None);
+            }
+        }
+    });
+    ui.mute_mic.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.toggle_mic();
+            }
+        }
+    });
+    ui.mute_speaker.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.toggle_speaker();
             }
         }
     });
@@ -455,7 +639,17 @@ fn refresh(ui: &Rc<Ui>) {
         ui.trust_panel.set_is_visible(false);
     }
 
+    if snapshot.room.is_none() {
+        ui.leave_voice(Some("off"));
+        ui.join_voice.set_is_visible(false);
+        ui.leave_voice.set_is_visible(false);
+        ui.mute_mic.set_is_visible(false);
+        ui.mute_speaker.set_is_visible(false);
+        ui.voice_status.set_text(Some(""));
+    }
+
     if let Some(room) = &snapshot.room {
+        refresh_voice(ui, &snapshot);
         let title = format!(
             "# {}   ·   {} member{}",
             room.room.name,
@@ -471,13 +665,20 @@ fn refresh(ui: &Rc<Ui>) {
         };
         ui.room_status.set_text(Some(&connection));
 
+        let levels = ui
+            .voice
+            .borrow()
+            .as_ref()
+            .map(|runtime| runtime.levels.borrow().clone())
+            .unwrap_or_default();
         let mut members = String::new();
         for member in &room.members {
             if !members.is_empty() {
                 members.push_str("   ·   ");
             }
             members.push_str(&member.name);
-            if member.session_id == room.self_member.session_id {
+            let is_self = member.session_id == room.self_member.session_id;
+            if is_self {
                 members.push_str(" (you)");
             }
             if member.self_mute {
@@ -485,6 +686,12 @@ fn refresh(ui: &Rc<Ui>) {
             }
             if member.sharing {
                 members.push_str(" [presenting]");
+            }
+            if member.voice {
+                members.push_str(" [voice]");
+            }
+            if speaking(&levels, if is_self { "" } else { &member.session_id }) {
+                members.push_str(" \u{266a}");
             }
         }
         ui.members.set_text(Some(&members));
@@ -534,6 +741,108 @@ fn refresh(ui: &Rc<Ui>) {
         ui.last_rooms.borrow_mut().clear();
         ui.last_messages.borrow_mut().clear();
     }
+}
+
+fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
+    let active_room = snapshot.room.as_ref().map(|room| room.room.id.clone());
+    let mut stop = None;
+    if let Some(runtime) = ui.voice.borrow().as_ref() {
+        if active_room.as_deref() != Some(runtime.room.as_str()) {
+            stop = Some("left with the room");
+        } else if !snapshot.connection.is_ready() {
+            stop = Some("disconnected");
+        }
+    }
+    if let Some(reason) = stop {
+        ui.leave_voice(Some(reason));
+    }
+    let Some(room) = snapshot.room.as_ref() else {
+        return;
+    };
+
+    let mut ended = None;
+    let mut peer_error = None;
+    {
+        let mut slot = ui.voice.borrow_mut();
+        if let Some(runtime) = slot.as_mut() {
+            loop {
+                match runtime.controller.try_recv() {
+                    Some(VoiceEvent::Ready) => {
+                        *ui.voice_note.borrow_mut() = Some("live".to_owned());
+                    }
+                    Some(VoiceEvent::Level { peer, level }) => {
+                        runtime
+                            .levels
+                            .borrow_mut()
+                            .insert(peer, (level, Instant::now()));
+                    }
+                    Some(VoiceEvent::SelfLevel(level)) => {
+                        runtime
+                            .levels
+                            .borrow_mut()
+                            .insert(String::new(), (level, Instant::now()));
+                    }
+                    Some(VoiceEvent::PeerFailed(error)) => peer_error = Some(error),
+                    Some(VoiceEvent::Error(error)) => {
+                        ended = Some(format!("audio failed: {error}"));
+                        break;
+                    }
+                    Some(VoiceEvent::Ended) => {
+                        ended = Some("ended".to_owned());
+                        break;
+                    }
+                    None => break,
+                }
+            }
+            if ended.is_none() {
+                let members: Vec<String> = room
+                    .members
+                    .iter()
+                    .filter(|member| member.voice)
+                    .map(|member| member.session_id.clone())
+                    .collect();
+                let signature = members.join(",");
+                if *runtime.members_signature.borrow() != signature {
+                    *runtime.members_signature.borrow_mut() = signature;
+                    runtime.controller.send(VoiceCommand::Members(members));
+                }
+            }
+        }
+    }
+    if let Some(reason) = ended {
+        ui.leave_voice(Some(&reason));
+    }
+    if let Some(error) = peer_error {
+        *ui.voice_note.borrow_mut() = Some(format!("a peer failed: {error}"));
+    }
+
+    let active = ui.voice.borrow().is_some();
+    let voice_room = room.room.voice;
+    ui.join_voice.set_is_visible(voice_room && !active);
+    ui.leave_voice.set_is_visible(active);
+    ui.mute_mic.set_is_visible(active);
+    ui.mute_speaker.set_is_visible(active);
+
+    let note = ui
+        .voice_note
+        .borrow()
+        .clone()
+        .unwrap_or_else(|| "off \u{2014} join to talk".to_owned());
+    let line = if voice_room || active {
+        format!("voice: {note}")
+    } else {
+        String::new()
+    };
+    if *ui.voice_line.borrow() != line {
+        *ui.voice_line.borrow_mut() = line.clone();
+        ui.voice_status.set_text(Some(&line));
+    }
+}
+
+fn speaking(levels: &HashMap<String, (f32, Instant)>, id: &str) -> bool {
+    levels
+        .get(id)
+        .is_some_and(|(level, at)| at.elapsed() < Duration::from_millis(500) && *level > 0.012)
 }
 
 fn smoke_request(settings: &ClientSettings) -> Option<ConnectRequest> {
@@ -599,6 +908,7 @@ fn main() -> std::process::ExitCode {
             password,
             client,
             memory,
+            runtime: runtime.handle().clone(),
         });
     });
 

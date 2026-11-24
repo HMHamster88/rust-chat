@@ -7,7 +7,7 @@ pub mod settings;
 pub mod snapshot;
 pub mod tls;
 
-pub use client::{ClientHandle, Command, ConnectRequest};
+pub use client::{ClientHandle, Command, ConnectRequest, IncomingSignal};
 pub use settings::{ClientSettings, ConnectionMemory, SettingsStore};
 pub use snapshot::{ChatSnapshot, TrustPrompt};
 
