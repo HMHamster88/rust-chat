@@ -55,6 +55,8 @@ input. The process tree includes `conhost.exe`; the app alone is slightly below 
 | FerroUI 0.5, Direct2D backend | 133.3 MB | 108.5 MB | ~0.0% |
 | FerroUI 0.5, Skia + ANGLE | 152.3 MB | 144.6 MB | ~0.1% |
 | FerroUI, 50,000 items (Direct2D) | 134.5 MB | 114.4 MB | ~0.0% |
+| FerroUI Direct2D texture spike, 1280×720 @10 fps | 81 MB | 207 MB | 3.0% |
 
-The 50k-vs-0 delta (+8 MB) shows the list virtualizes. Details in
-`../spikes/ferroui/README.md`.
+The 50k-vs-0 delta (+8 MB) shows the list virtualizes. The texture spike's private bytes include
+the eight D3D11 textures and the Direct2D composition surfaces; the working set is the visible
+figure. Details in `../spikes/ferroui/README.md` and `../spikes/ferroui-texture/README.md`.

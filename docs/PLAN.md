@@ -79,6 +79,9 @@ crates/app-desktop     rust-chat binary
 crates/app-android     cdylib + thin Kotlin shell
 xtask                  Packaging, manifests, version
 spikes/ferroui         M0 UI gate (standalone Cargo project)
+spikes/ferroui-d2d     M0 Direct2D variant of the UI gate
+spikes/ferroui-android M0 Android gate (cdylib + Gradle shell)
+spikes/ferroui-texture M3 Direct2D live-texture gate
 spikes/webrtc-loopback M0 media gate (standalone Cargo project)
 deploy/                Docker, systemd, coturn, VPS scripts
 docs/                  PLAN, PROTOCOL, BASELINE, SETTINGS, HISTORY, UPDATES
@@ -120,7 +123,7 @@ Normative text in [`PROTOCOL.md`](./PROTOCOL.md).
 | Jitter buffer / PLC | small custom reorder buffer + Opus PLC |
 | Screen capture | `windows-capture` 2.0 (WGC); X11 later; Wayland unsupported |
 | Video codec | VP8 via libvpx (royalty-free, matches v1, browser-compatible later) |
-| Video render | `wgpu` YUV→RGB shader into the UI texture |
+| Video render | FerroUI `TexturePresenter` over Direct2D/D3D11 shared textures on Windows; Skia/GLES on Android; `WriteableBitmap` + `Image` as the first-slice/fallback path |
 | Remote input | `windows` crate `SendInput` |
 | TLS | `rustls` + `rcgen` self-signed, TOFU pinning via a custom certificate verifier |
 
@@ -260,9 +263,11 @@ the TECNO, 5,000-item list virtualizes, keyboard/Back/rotation work, 175–186 M
 native **Direct2D** backend on Windows (no Skia/ANGLE/libclang, lower memory) and **Skia** on
 Android (the only backend there). The two remaining unknowns are explicit M3 tasks:
 
-1. **Live video texture**: present decoded VP8 at 10 fps. FerroUI has composited texture presenters
-   and GPU interop; if they do not fit, its native control host is the escape hatch (a child
-   surface for the video pane) without changing the UI toolkit.
+1. **Live video texture** — *pre-work done 2026-11-25*: `spikes/ferroui-texture` presents
+   1280×720 BGRA frames through `TexturePresenter` + `D3D11TextureImporter`, **3.0% of one core
+   at 10 fps** in release (peak 5.7%), 81 MB working set, **0 explicit readbacks**, and a pixel
+   capture confirms live motion. Remaining: the VP8→I420→BGRA→D3D11 adapter, decode on a worker
+   thread, and a lease-aware texture pool (the spike uses an eight-texture rotation).
 2. **Framework maturity**: pin `=0.5.0`, keep UI code behind our own screens/widgets, and do not
    depend on internal control templates.
 
