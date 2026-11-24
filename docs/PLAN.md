@@ -343,5 +343,8 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   connects two SCRAM clients through the real server, relays the offer/answer, and receives
   non-silent audio on both sides (0.5 s). The whole workspace test suite and
   `clippy -D warnings` are clean.
+- Verified through the real desktop UI with two instances: both show `voice: live` and the two
+  members as `[voice]`, and the call survives a WASAPI xrun (xruns no longer end the session).
+  One client in a call measures **114.6 MB** working set and **1.9%** of one core.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

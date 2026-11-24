@@ -235,7 +235,9 @@ impl AudioIo {
                 {
                     let events = event_tx.clone();
                     move |error| {
-                        let _ = events.send(AudioEvent::Error(format!("microphone: {error}")));
+                        if fatal_audio_error(&error) {
+                            let _ = events.send(AudioEvent::Error(format!("microphone: {error}")));
+                        }
                     }
                 },
                 None,
@@ -303,7 +305,9 @@ impl AudioIo {
                 {
                     let events = event_tx.clone();
                     move |error| {
-                        let _ = events.send(AudioEvent::Error(format!("speakers: {error}")));
+                        if fatal_audio_error(&error) {
+                            let _ = events.send(AudioEvent::Error(format!("speakers: {error}")));
+                        }
                     }
                 },
                 None,
@@ -556,6 +560,14 @@ fn write_output(data: &mut Data, format: SampleFormat, channels: usize, samples:
         }
         _ => {}
     }
+}
+
+/// Xruns and automatic rerouting do not end a call; everything else is fatal.
+fn fatal_audio_error(error: &cpal::Error) -> bool {
+    !matches!(
+        error.kind(),
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::DeviceChanged
+    )
 }
 
 fn rms_f32(samples: &[f32]) -> f32 {
