@@ -38,7 +38,11 @@ function Get-Tree([int]$RootId) {
 }
 
 if ($Exe) {
-    $start = Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru
+    $start = if ($Arguments.Count -gt 0) {
+        Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru
+    } else {
+        Start-Process -FilePath $Exe -PassThru
+    }
     $rootId = $start.Id
     "started $Exe (pid $rootId), warming up ${WarmupSeconds}s"
 } elseif ($Name) {

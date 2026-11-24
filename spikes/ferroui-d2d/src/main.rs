@@ -55,12 +55,16 @@ impl ApplicationImpl for App {
 }
 
 fn create_main_window() -> Ref<Window> {
+    let message_count = std::env::var("FERROUI_MESSAGES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(MESSAGE_COUNT);
     let header = TextBlock::new();
     header.set_text(Some("FerroUI M0 gate — 5,000-message list + multiline input"));
     header.set_font_size(18.0);
 
     let messages = Rc::new(FerroList::new());
-    messages.add_range((0..MESSAGE_COUNT).map(|index| {
+    messages.add_range((0..message_count).map(|index| {
         format!(
             "#{index:05}  alice  ·  a message long enough to exercise text layout and wrapping, #{}",
             index % 7
@@ -81,9 +85,10 @@ fn create_main_window() -> Ref<Window> {
     ));
 
     let status = TextBlock::new();
-    status.set_text(Some(format!("{MESSAGE_COUNT} messages")));
+    let initial_status = format!("{message_count} messages");
+    status.set_text(Some(&initial_status));
 
-    let next_index = Rc::new(Cell::new(MESSAGE_COUNT));
+    let next_index = Rc::new(Cell::new(message_count));
     let append = Button::new();
     append.set_content(Some(Rc::new("Append message".to_string())));
     append.click({
@@ -94,13 +99,13 @@ fn create_main_window() -> Ref<Window> {
             let index = next_index.get();
             next_index.set(index + 1);
             messages.insert(0, format!("#{index:05}  bob  ·  appended from the gate"));
-            status.set_text(Some(format!("{} messages", index + 1)));
+            let updated = format!("{} messages", index + 1);
+            status.set_text(Some(&updated));
         }
     });
 
     let panel = StackPanel::new();
     panel.set_spacing(12.0);
-    panel.set_padding(Thickness::uniform(16.0));
     panel.set_horizontal_alignment(HorizontalAlignment::Stretch);
     panel.set_vertical_alignment(VerticalAlignment::Stretch);
     panel.children().add(header);
@@ -113,6 +118,7 @@ fn create_main_window() -> Ref<Window> {
     window.set_title(Some("FerroUI D2D spike".to_string()));
     window.set_width(900.0);
     window.set_height(700.0);
+    window.set_padding(Thickness::uniform(16.0));
     window.set_content(Some(Control::boxed(panel)));
 
     window.opened(|| println!("window opened")).detach();

@@ -44,3 +44,17 @@ part of these numbers.
 | Android, connected + voice | ≤ 180 MB RSS |
 
 `docs/PLAN.md` §10 describes the scripts that will measure these on every release.
+
+## Rust spike candidates (2026-11-24)
+
+Measured with `scripts/measure.ps1`, same machine, window with a 5,000-item list and a multiline
+input. The process tree includes `conhost.exe`; the app alone is slightly below these values.
+
+| Candidate | Working set | Private | Idle CPU |
+|---|---:|---:|---:|
+| FerroUI 0.5, Direct2D backend | 133.3 MB | 108.5 MB | ~0.0% |
+| FerroUI 0.5, Skia + ANGLE | 152.3 MB | 144.6 MB | ~0.1% |
+| FerroUI, 50,000 items (Direct2D) | 134.5 MB | 114.4 MB | ~0.0% |
+
+The 50k-vs-0 delta (+8 MB) shows the list virtualizes. Details in
+`../spikes/ferroui/README.md`.

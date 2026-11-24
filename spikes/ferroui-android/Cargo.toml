@@ -1,0 +1,18 @@
+[package]
+name = "ferroui-android-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone: gate 5 of the M0 UI evaluation.
+[workspace]
+
+[lib]
+name = "ferroui_android_spike"
+crate-type = ["cdylib"]
+
+[dependencies]
+ferroui-android = "=0.5.0"
+ferroui-base = "=0.5.0"
+ferroui-controls = "=0.5.0"
+ferroui-themes-material = "=0.5.0"

@@ -7,6 +7,11 @@
 spikes/**/Cargo.lock
 spikes/**/target/
 spikes/**/*.log
+spikes/**/*.png
+spikes/**/build/
+spikes/**/.gradle/
+spikes/**/local.properties
+spikes/**/src/main/jniLibs/**/*.so
 
 # Editors / OS
 .idea/

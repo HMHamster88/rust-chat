@@ -262,5 +262,5 @@ decision required) is the pre-agreed fallback; egui is the fallback if only desk
 | Crypto crate | Argon2id verifier (Kotlin-file-compatible), SCRAM-SHA-256, fingerprints, tests |
 | Server CLI | `init`, `hash-password`, `fingerprint` work; ECDSA P-256 cert + TOFU fingerprint printed |
 | Docs | `PLAN.md`, `PROTOCOL.md`, `BASELINE.md`, this file |
-| FerroUI gate | see `spikes/ferroui/README.md` and `docs/BASELINE.md` |
+| FerroUI gate | builds on Windows (Skia needs the documented LLVM/libclang prerequisite; Direct2D needs only MSVC). 5,000-item list: **133.3 MB** working set on Direct2D, **152.3 MB** on Skia; 50,000 items cost +8 MB, so the list virtualizes. Idle CPU ~0%. Android: the same UI builds with `cargo ndk`, installs and launches on the TECNO (164 MB PSS debug); visual/IME checks wait for the owner to unlock the phone |
 | Media gate | **passed**: two `webrtc-rs` peers connect over loopback and a data-channel payload arrives intact; see `spikes/webrtc-loopback/README.md` |
