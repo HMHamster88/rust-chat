@@ -269,4 +269,26 @@ mod tests {
         assert!(!a.contains(':'));
         assert_ne!(sanitize("a/b"), sanitize("a?b"));
     }
+
+    /// Opt-in because it writes to the real OS credential store:
+    /// `cargo test -p rust-chat-client-core keyring_round_trip -- --ignored`.
+    #[test]
+    #[ignore]
+    fn keyring_round_trip() {
+        let memory = ConnectionMemory::new();
+        if !memory.can_remember_password() {
+            return;
+        }
+        let settings = ClientSettings {
+            remember_password: true,
+            ..ClientSettings::default()
+        };
+        memory.save(&settings, Some("keyring-test-secret")).unwrap();
+        let (loaded, password) = memory.load();
+        assert!(loaded.remember_password);
+        assert_eq!(password.as_deref(), Some("keyring-test-secret"));
+        memory.clear_saved_server().unwrap();
+        let (_, cleared) = memory.load();
+        assert_eq!(cleared, None);
+    }
 }
