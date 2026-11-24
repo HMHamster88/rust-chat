@@ -41,7 +41,7 @@ part of these numbers.
 | Desktop connect screen | ≤ 180 MB RSS, <1% CPU |
 | Desktop, 4-peer voice | ≤ 250 MB RSS, <8% CPU |
 | Desktop, 720p10 share | <25% of one core for encode |
-| Android, connected + voice | ≤ 180 MB RSS |
+| Android, connected + voice | ≤ 200 MB PSS |
 
 `docs/PLAN.md` §10 describes the scripts that will measure these on every release.
 

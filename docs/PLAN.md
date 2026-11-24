@@ -10,9 +10,10 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Server:** Rust (tokio + axum + rustls), one static binary.
 - **Clients:** Rust — desktop first (Windows, then Linux/macOS) and Android.
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
-- **UI:** decided by the M0 FerroUI gate; fallback Slint or egui.
-- **Status:** M0 in progress (scaffold, protocol/crypto foundations, server CLI, baseline,
-  toolkit and media spikes).
+- **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
+  presentation is the first M3 gate.
+- **Status:** M0 complete (scaffold, protocol/crypto foundations, server CLI, baseline, UI and
+  media gates). Next: M1, the WebSocket server.
 
 ---
 
@@ -252,6 +253,18 @@ The gate passes only if all of these hold:
 
 If any gate fails: **Slint 1.19** (mature, one codebase, GPLv3 or paid/royalty-free — licensing
 decision required) is the pre-agreed fallback; egui is the fallback if only desktop matters.
+
+**Verdict (M0): adopt FerroUI.** It passed the desktop gates (133–152 MB with a 5,000-item list,
+virtualization confirmed, ~0% idle CPU) and the Android gates (51.4 MB APK, installs/launches on
+the TECNO, 5,000-item list virtualizes, keyboard/Back/rotation work, 175–186 MB PSS). Use the
+native **Direct2D** backend on Windows (no Skia/ANGLE/libclang, lower memory) and **Skia** on
+Android (the only backend there). The two remaining unknowns are explicit M3 tasks:
+
+1. **Live video texture**: present decoded VP8 at 10 fps. FerroUI has composited texture presenters
+   and GPU interop; if they do not fit, its native control host is the escape hatch (a child
+   surface for the video pane) without changing the UI toolkit.
+2. **Framework maturity**: pin `=0.5.0`, keep UI code behind our own screens/widgets, and do not
+   depend on internal control templates.
 
 ---
 

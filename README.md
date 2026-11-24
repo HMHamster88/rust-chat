@@ -14,9 +14,9 @@ coturn, unchanged.
 
 ## Status
 
-**M0 — scaffold.** The workspace, protocol/crypto foundations and server CLI (`init`,
-`hash-password`, `fingerprint`) exist. The WebSocket server is M1; the desktop shell is M2; the
-media spike is M3. The FerroUI gate decides the UI toolkit before the shell is built.
+**M0 complete — scaffold, protocol/crypto, server CLI, baseline, UI and media gates.** The
+workspace builds and tests green. The WebSocket server is M1; the desktop shell is M2; the media
+spike is M3. FerroUI passed the toolkit gate: Direct2D on Windows, Skia on Android.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.
