@@ -12,6 +12,7 @@ spikes/**/build/
 spikes/**/.gradle/
 spikes/**/local.properties
 spikes/**/src/main/jniLibs/**/*.so
+spikes/ferroui-android/window*.xml
 
 # Editors / OS
 .idea/

@@ -142,14 +142,17 @@ plan does not assume it.
 
 ## 6. Android
 
-- `android-activity` + `cdylib`; UI from the shared toolkit.
-- Thin Kotlin/Java shell for: microphone permission, call foreground service + notification,
-  SAF file picker, MediaStore downloads, APK installer intent.
+- Shared Rust UI and core (`ferroui-android` for the M0 candidate); `cdylib` built with `cargo ndk`.
+- FerroUI already ships the Java layer this design calls for: `FerroApplication` (loads the native
+  library named in the manifest meta-data), `FerroMainActivity`, `FerroView`, and the input
+  connection. The M0 spike uses it unchanged; our own Java additions (SAF picker, MediaStore,
+  call foreground service, APK installer intent) slot in beside it.
 - Mic/playout: AAudio via cpal; platform AEC if an audio session is required, otherwise APM.
 - Video: receive-only, VP8 software decode → GLES/Vulkan texture. No capture, no MediaProjection.
 - Files: send through a SAF `content://` URI; receive into Downloads via MediaStore.
-- Packaging: Gradle wrapper around `cargo-ndk` (low risk); test on the real TECNO LJ8, not only
-  the emulator.
+- Packaging: Gradle (AGP 8.13.2, compileSdk 35, minSdk 26) around `cargo ndk`; release `.so`
+  stripped, debug builds are not representative of size.
+- Test on the real TECNO LJ8, not only the emulator.
 - The `screen-control` capability is never advertised by Android.
 
 ---
@@ -262,5 +265,5 @@ decision required) is the pre-agreed fallback; egui is the fallback if only desk
 | Crypto crate | Argon2id verifier (Kotlin-file-compatible), SCRAM-SHA-256, fingerprints, tests |
 | Server CLI | `init`, `hash-password`, `fingerprint` work; ECDSA P-256 cert + TOFU fingerprint printed |
 | Docs | `PLAN.md`, `PROTOCOL.md`, `BASELINE.md`, this file |
-| FerroUI gate | builds on Windows (Skia needs the documented LLVM/libclang prerequisite; Direct2D needs only MSVC). 5,000-item list: **133.3 MB** working set on Direct2D, **152.3 MB** on Skia; 50,000 items cost +8 MB, so the list virtualizes. Idle CPU ~0%. Android: the same UI builds with `cargo ndk`, installs and launches on the TECNO (164 MB PSS debug); visual/IME checks wait for the owner to unlock the phone |
+| FerroUI gate | builds on Windows (Skia needs the documented LLVM/libclang prerequisite; Direct2D needs only MSVC). 5,000-item list: **133.3 MB** working set on Direct2D, **152.3 MB** on Skia; 50,000 items cost +8 MB, so the list virtualizes. Idle CPU ~0%. Android: builds with `cargo ndk`, **51.4 MB APK** after stripping, installs and runs on the TECNO; 5,000-item list virtualizes (10–16 realized items); IME connects and Back hides it; rotation works; **175–186 MB PSS** on a fresh launch |
 | Media gate | **passed**: two `webrtc-rs` peers connect over loopback and a data-channel payload arrives intact; see `spikes/webrtc-loopback/README.md` |

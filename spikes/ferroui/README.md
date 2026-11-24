@@ -61,8 +61,8 @@ private (`../../docs/BASELINE.md`).
 | 2 | 5,000-message virtualized list scrolls at 60 fps | **virtualization confirmed** by the 50k-vs-0 memory test; 60 fps needs a manual scroll check |
 | 3 | Multiline CJK/emoji input, IME and selection | multiline + the sample string render; real IME/selection check is manual |
 | 4 | Fake 720p10 texture presents at <10% CPU | not built yet (FerroUI has composited texture presenters; needs the GPU interop spike) |
-| 5 | Android emulator **and** real TECNO LJ8, IME/back/rotation | not built yet (SDK + NDK 26.1 are installed) |
-| 6 | Idle RSS ≤ 180 MB; compile time and binary size recorded | **pass**: 133–153 MB with the list; sizes above |
+| 5 | Android emulator **and** real TECNO LJ8, IME/back/rotation | **pass on the real device**: builds, installs, launches, 5,000-item list virtualizes, keyboard/Back/rotation work; see `../ferroui-android/README.md` |
+| 6 | Idle RSS ≤ 180 MB; compile time and binary size recorded | **pass on desktop**: 133–153 MB with the list; sizes above. Android: 175–186 MB PSS and a 51.4 MB APK |
 | 7 | No bug forces a fork or product-level workaround | **pass so far** (no fork; the LLVM prerequisite is documented) |
 
 Verdict so far: the memory target passes with a comfortable margin, and the Direct2D backend is

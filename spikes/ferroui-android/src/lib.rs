@@ -80,6 +80,7 @@ mod app {
 
         let list = ListBox::new();
         list.set_items_source(Some(ItemsSource::from(messages.clone())));
+        list.set_height(550.0);
 
         let input = TextBox::new();
         input.set_accepts_return(true);
