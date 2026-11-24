@@ -6,4 +6,12 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait = "0.1.89"
+bytes = "1.12.0"
+futures-util = "0.3.34"
+opus = "0.4.0"
+rand = "0.10.4"
+rtc = "0.21.1"
 thiserror = { workspace = true }
+tokio = { version = "1.54.1", features = ["full"] }
+webrtc = "0.21.1"

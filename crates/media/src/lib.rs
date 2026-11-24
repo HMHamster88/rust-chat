@@ -4,6 +4,9 @@
 //! behind this trait, mirroring the Kotlin `MediaEngine` boundary. The WebRTC implementation is
 //! chosen in M3; the trait is deliberately small enough to survive that decision.
 
+pub mod audio;
+pub mod voice;
+
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
