@@ -1,0 +1,16 @@
+[package]
+name = "rust-chat-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+argon2 = { workspace = true }
+base64 = { workspace = true }
+hmac = { workspace = true }
+rand = "0.10.4"
+rust-chat-protocol = { path = "../protocol" }
+sha2 = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }

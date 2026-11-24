@@ -1,0 +1,15 @@
+[package]
+name = "rust-chat-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rust-chat"
+path = "src/main.rs"
+
+[dependencies]
+rust-chat-media-desktop = { path = "../media-desktop" }
+rust-chat-protocol = { path = "../protocol" }
+rust-chat-ui = { path = "../ui" }

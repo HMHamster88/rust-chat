@@ -1,0 +1,12 @@
+[package]
+name = "rust-chat-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+rust-chat-ui = { path = "../ui" }

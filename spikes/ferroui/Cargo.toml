@@ -1,0 +1,11 @@
+[package]
+name = "ferroui-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone on purpose: the spike must not affect the product workspace or its lockfile.
+[workspace]
+
+[dependencies]
+ferroui = "=0.5.0"

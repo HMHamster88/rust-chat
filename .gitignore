@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/target/
+!xtask/**
+
+# Spike projects keep their own lockfiles and logs
+spikes/**/Cargo.lock
+spikes/**/target/
+spikes/**/*.log
+
+# Editors / OS
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local runtime state (server credentials, pins, history)
+/config/
+*.p12
+*.pem
+*.key
+!crates/**/tests/fixtures/**/*.pem
+
+# Release output
+/dist/
+*.zip
+*.msi
+*.apk

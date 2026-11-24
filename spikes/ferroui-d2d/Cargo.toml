@@ -1,0 +1,15 @@
+[package]
+name = "ferroui-d2d-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone. This variant uses FerroUI's opt-in native Windows backend (Direct2D/DirectWrite),
+# which needs no Skia, no ANGLE and no libclang, so the gate can run on a clean machine.
+[workspace]
+
+[dependencies]
+ferroui-base = "=0.5.0"
+ferroui-controls = "=0.5.0"
+ferroui-desktop = { version = "=0.5.0", default-features = false, features = ["direct2d"] }
+ferroui-themes-fluent = "=0.5.0"
