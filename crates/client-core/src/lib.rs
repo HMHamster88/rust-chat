@@ -1,7 +1,15 @@
-//! Client state shared by the desktop and Android apps.
-//!
-//! M0 defines the connection state machine and the reconnect schedule; the WebSocket client
-//! and room store land in M2.
+//! Shared client core: settings, TOFU pins, history, and the WebSocket client state machine.
+
+pub mod client;
+pub mod history;
+pub mod pins;
+pub mod settings;
+pub mod snapshot;
+pub mod tls;
+
+pub use client::{ClientHandle, Command, ConnectRequest};
+pub use settings::{ClientSettings, ConnectionMemory, SettingsStore};
+pub use snapshot::{ChatSnapshot, TrustPrompt};
 
 use rust_chat_protocol::{Member, RoomSummary};
 use std::time::Duration;
@@ -27,6 +35,18 @@ impl ConnectionFailure {
         self.hint = Some(hint.into());
         self
     }
+
+    pub fn with_optional_hint(mut self, hint: Option<String>) -> Self {
+        self.hint = hint;
+        self
+    }
+}
+
+pub fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Coarse connection state surfaced to the UI.
@@ -128,10 +148,10 @@ mod tests {
         assert_eq!(ConnectionState::Ready.label(), "connected");
         assert_eq!(
             ConnectionState::Connecting {
-                endpoint: "127.0.0.1:8443".into()
+                endpoint: "127.0.0.1:8444".into()
             }
             .label(),
-            "connecting to 127.0.0.1:8443"
+            "connecting to 127.0.0.1:8444"
         );
         assert_eq!(
             ConnectionState::Reconnecting {

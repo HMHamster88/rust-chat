@@ -74,7 +74,7 @@ impl Default for ServerConfig {
             server_name: "rust-chat".into(),
             motd: "Welcome".into(),
             host: "0.0.0.0".into(),
-            port: 8443,
+            port: 8444,
             verifier_file: "config/verifier".into(),
             client_rooms_file: "config/rooms.json".into(),
             max_users_per_room: rust_chat_protocol::DEFAULT_MAX_MEMBERS_PER_ROOM,
@@ -171,7 +171,7 @@ mod tests {
         let text = toml::to_string_pretty(&config).unwrap();
         let parsed: ServerConfig = toml::from_str(&text).unwrap();
         assert_eq!(parsed.server_name, "rust-chat");
-        assert_eq!(parsed.port, 8443);
+        assert_eq!(parsed.port, 8444);
         assert_eq!(parsed.rooms.len(), 2);
         assert_eq!(parsed.rooms[0].id, "lobby");
         assert!(parsed.tls.enabled);

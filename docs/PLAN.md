@@ -12,9 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M1 complete (WSS control plane: SCRAM auth, TLS, rooms, presence, chat, signaling,
-  file relay, TURN). Next: M2, the desktop shell. The M0 UI/media gates and the M3 texture
-  pre-work are recorded in §11/§12.
+- **Status:** M2 core complete (desktop shell: TOFU pinning, SCRAM, rooms, chat, history,
+  keyring). Next: M3, voice and screen media. M0/M1 results and the M3 texture pre-work are in
+  §11/§12; the settings-screen and update-check polish remain.
 
 ---
 
@@ -45,7 +45,7 @@ transfer resume, Wayland screen capture, Android screen capture.
 ```
 ┌──────────────────────────────┐         ┌───────────────────────────────┐
 │ Desktop / Android client     │         │ rust-chat-server (tokio)      │
-│  UI (FerroUI/Slint/egui)     │◄───────►│  WSS :8443 (rustls)           │
+│  UI (FerroUI/Slint/egui)     │◄───────►│  WSS :8444 (rustls)           │
 │  client-core state machine   │  JSON   │  rooms · presence · text      │
 │  webrtc-rs mesh (8 peers)    │  v2     │  SCRAM auth · rate limits     │
 │  cpal/AAudio · Opus · VP8    │         │  opaque SDP/ICE relay         │
@@ -305,3 +305,22 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 - Tests: 17 server unit tests + 5 real WebSocket integration tests (wrong password, two clients
   chatting, signal relay and bad target, room create/join/leave/delete, `no-auto-room`), 49
   workspace tests total; `clippy -D warnings` clean.
+
+### M2 — desktop shell (2026-11-25)
+
+- `client-core`: flat JSON settings (default port 8444), Windows key store for the optional saved
+  password, TOFU pin store, rustls with `ring`, SCRAM handshake, automatic reconnect
+  (0.5 s → 30 s with jitter), rooms, chat, presence, and a JSONL history per server/room with a
+  500-message window and compaction.
+- FerroUI Direct2D shell: connect screen (host, port, name, password, TLS, remember), a trust
+  prompt that shows the fingerprint and requires Approve/Deny, a **Forget pinned key** action,
+  room list, members, chat feed and composer. The screen follows the connection/room state.
+- Verified by UI Automation against a real server: connect, render `# Lobby` and members, send
+  `hello from the UI`; after killing and relaunching the app the message is restored from
+  history (`HISTORY-OK`).
+- TLS pinning test against a real TLS server: first contact prompts and pins the certificate,
+  the next connection is silent, and a wrong pin is a hard `certificate changed` failure.
+- Memory/CPU: **99.4 MB** working set / 0.2% idle on the connect screen; **98.3 MB** / 0.6% in a
+  room (the Kotlin client: 408–420 MB / ~9%).
+- Remaining M2 polish (not gating): a full settings screen, theme/density, update checker,
+  room create/delete/leave controls in the UI, and audio-device selection (M3).

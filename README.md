@@ -14,12 +14,11 @@ coturn, unchanged.
 
 ## Status
 
-**M1 complete — WebSocket control plane.** The server speaks WSS with a self-signed
-certificate, SCRAM-SHA-256 authentication, rooms/presence/chat, opaque WebRTC signaling and file
-metadata relay, TURN credentials and client-room persistence. The workspace builds and tests
-green (49 tests, including five real WebSocket clients). Next is M2, the desktop shell; then M3
-media. FerroUI passed the toolkit gate (Direct2D on Windows, Skia on Android), and the M3 texture
-pre-work proves live 720p frames through Direct2D at 3% of one core with zero CPU readbacks.
+**M2 core complete — desktop shell.** The FerroUI/Direct2D client connects over WSS with TOFU
+pinning, SCRAM auth, rooms, members and chat; local history survives a restart, the password can
+live in the OS key store, and reconnect is automatic. Measured **98–99 MB** working set and under
+1% idle CPU (the Kotlin client was 408–420 MB and ~9%). Next is M3 media. Settings-screen polish,
+the update checker and audio devices remain for their milestones.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.

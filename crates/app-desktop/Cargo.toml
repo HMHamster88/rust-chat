@@ -10,6 +10,10 @@ name = "rust-chat"
 path = "src/main.rs"
 
 [dependencies]
-rust-chat-media-desktop = { path = "../media-desktop" }
+ferroui-base = "=0.5.0"
+ferroui-controls = "=0.5.0"
+ferroui-desktop = { version = "=0.5.0", default-features = false, features = ["direct2d"] }
+ferroui-themes-fluent = "=0.5.0"
+rust-chat-client-core = { path = "../client-core" }
 rust-chat-protocol = { path = "../protocol" }
-rust-chat-ui = { path = "../ui" }
+tokio = { version = "1.54.1", features = ["full"] }
