@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
 use webrtc::media_stream::Track;
 use webrtc::media_stream::track_local::TrackLocal;
 use webrtc::media_stream::track_local::static_sample::TrackLocalStaticSample;
@@ -82,6 +83,16 @@ pub fn turn_ice_servers(turn: &rust_chat_protocol::payloads::TurnCredentials) ->
     }]
 }
 
+async fn pump_control(channel: Arc<dyn DataChannel>, messages: mpsc::UnboundedSender<String>) {
+    while let Some(event) = channel.poll().await {
+        if let DataChannelEvent::OnMessage(message) = event
+            && let Ok(text) = String::from_utf8(message.data.to_vec())
+        {
+            let _ = messages.send(text);
+        }
+    }
+}
+
 fn is_relay(entry: Option<&RTCStatsReportEntry>) -> bool {
     matches!(
         entry,
@@ -117,6 +128,8 @@ struct Handler {
     frames: mpsc::UnboundedSender<RtpFrame>,
     video: mpsc::UnboundedSender<DecodedVideo>,
     video_lost: mpsc::UnboundedSender<()>,
+    control_in: mpsc::UnboundedSender<String>,
+    control: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -142,6 +155,20 @@ impl PeerConnectionEventHandler for Handler {
             }
             _ => {}
         }
+    }
+
+    async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
+        let Ok(label) = channel.label().await else {
+            return;
+        };
+        if label != "control" {
+            return;
+        }
+        if let Ok(mut slot) = self.control.lock() {
+            *slot = Some(channel.clone());
+        }
+        let messages = self.control_in.clone();
+        self.runtime.spawn(pump_control(channel, messages));
     }
 
     async fn on_track(&self, track: Arc<dyn TrackRemote>) {
@@ -205,6 +232,9 @@ pub struct VoicePeer {
     /// Decoded VP8 screen frames from the remote peer.
     pub received_video: Option<mpsc::UnboundedReceiver<DecodedVideo>>,
     video_lost: Option<mpsc::UnboundedReceiver<()>>,
+    control: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
+    control_in: Option<mpsc::UnboundedReceiver<String>>,
+    control_in_tx: mpsc::UnboundedSender<String>,
     configured_ssrc: u32,
     ssrc: u32,
     payload_type: u8,
@@ -225,6 +255,8 @@ impl VoicePeer {
         let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<RtpFrame>();
         let (video_tx, video_rx) = mpsc::unbounded_channel();
         let (lost_tx, lost_rx) = mpsc::unbounded_channel();
+        let (control_in_tx, control_in_rx) = mpsc::unbounded_channel();
+        let control_channel = Arc::new(std::sync::Mutex::new(None));
         let connected = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(false));
         let (pcm_tx, pcm_rx) = mpsc::unbounded_channel();
@@ -250,6 +282,8 @@ impl VoicePeer {
             frames: frame_tx,
             video: video_tx,
             video_lost: lost_tx,
+            control_in: control_in_tx.clone(),
+            control: control_channel.clone(),
             runtime: tokio::runtime::Handle::current(),
         });
         let configuration = RTCConfigurationBuilder::new()
@@ -325,6 +359,9 @@ impl VoicePeer {
             received: Some(pcm_rx),
             received_video: Some(video_rx),
             video_lost: Some(lost_rx),
+            control: control_channel,
+            control_in: Some(control_in_rx),
+            control_in_tx,
             configured_ssrc,
             ssrc: configured_ssrc,
             payload_type: OPUS_PAYLOAD_TYPE,
@@ -375,6 +412,37 @@ impl VoicePeer {
     /// Signals that the VP8 decoder lost its reference and needs a keyframe.
     pub fn take_video_lost(&mut self) -> Option<mpsc::UnboundedReceiver<()>> {
         self.video_lost.take()
+    }
+
+    /// Offerer side: creates the reliable `control` channel before the offer.
+    pub async fn create_control(&mut self) -> Result<(), VoiceError> {
+        if self
+            .control
+            .lock()
+            .map(|slot| slot.is_some())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        let channel = self.connection.create_data_channel("control", None).await?;
+        if let Ok(mut slot) = self.control.lock() {
+            *slot = Some(channel.clone());
+        }
+        let messages = self.control_in_tx.clone();
+        tokio::spawn(pump_control(channel, messages));
+        Ok(())
+    }
+
+    pub fn take_control(&mut self) -> Option<mpsc::UnboundedReceiver<String>> {
+        self.control_in.take()
+    }
+
+    pub async fn send_control(&self, text: &str) -> bool {
+        let channel = self.control.lock().ok().and_then(|slot| slot.clone());
+        match channel {
+            Some(channel) => channel.send_text(text).await.is_ok(),
+            None => false,
+        }
     }
 
     pub async fn wait_connected(&self, timeout: Duration) -> Result<(), VoiceError> {

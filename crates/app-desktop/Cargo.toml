@@ -25,12 +25,14 @@ rust-chat-client-core = { path = "../client-core" }
 rust-chat-media = { path = "../media" }
 rust-chat-media-desktop = { path = "../media-desktop" }
 rust-chat-protocol = { path = "../protocol" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { version = "1.54.1", features = ["full"] }
 windows = { version = "0.61.3", features = [
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi_Common",
+    "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
 [dev-dependencies]

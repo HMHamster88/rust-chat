@@ -2,6 +2,7 @@
 
 pub mod audio;
 pub mod capture;
+pub mod input;
 
 pub use rust_chat_media::{AudioDevice, AudioDevices, CaptureSource, MediaEngine, PeerId};
 

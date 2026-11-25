@@ -14,12 +14,12 @@ coturn, unchanged.
 
 ## Status
 
-**M4 complete — mesh polish.** Calls use the server's TURN credentials, rebuild lost peer
-connections with capped backoff, request keyframes when the VP8 decoder loses its reference, show
-per-peer RTT/relay labels, and rejoin the call automatically after a control-plane reconnect. A
-4-client mesh keeps talking through churn in both an integration test and the real UI. Next is
-**M5: remote control** (screen sharing itself shipped with M3) plus the monitor/window picker,
-resolution settings and device pickers.
+**M5 remote control complete.** A viewer with the presenter pane can request control over the
+peer-to-peer `control` data channel; the host sees an Allow/Deny prompt and grants a 5–60 minute
+lease (30 default). Granted input is injected through `SendInput` with mouse, wheel and keyboard
+mapping, Alt+F4 filtered, heartbeat monitoring and release-all on end. Verified end to end: real
+pointer moves, a click and an `A` keypress crossed from the viewer to the host's shared monitor.
+Next is the remaining M5 polish (monitor/window picker, resolution/fps settings) and M6 files.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.

@@ -267,8 +267,8 @@ The server is unaware of this section; it only relays `rtc.signal`.
 
 - One peer connection per remote member, created when the member appears in `room.state`.
 - Tracks: one audio (mic) and one video (screen share) transceiver, negotiated up front.
-- Data channels: two reliable, ordered channels created by the offerer before the initial offer:
-  `files` then `control`. Bind by label; ignore unknown labels.
+- Data channels: the offerer creates the reliable, ordered `control` channel before its offer.
+  The `files` channel is added in M6 with the same pattern.
 - On `member.left`, close and remove the local peer connection immediately.
 - Starting or stopping a share starts/stops the capture source. It never changes the SDP.
 
@@ -318,6 +318,29 @@ a third track) would require perfect negotiation with rollback and replace this 
   derived from the selected candidate pair, never guessed.
 - The peer that owns the offer retries a failed connection with an ICE restart, up to three
   times with growing backoff.
+
+### 6.5 Remote control
+
+The `control` data channel carries newline-free JSON objects with a `t` tag:
+
+| `t` | Body | Meaning |
+|---|---|---|
+| `request` | `{leaseSecs}` | Ask the sharer for control. |
+| `grant` | `{leaseSecs}` | Accept; both sides start the lease. |
+| `deny` | `{reason}` | Refuse. |
+| `revoke` | `{reason}` | Host ends an active grant. |
+| `end` | `{reason}` | Viewer ends control. |
+| `heartbeat` | — | Viewer liveness, every 5 s. |
+| `input` | `{event}` | One mouse/key event. |
+
+`event` is `{kind:"mouse_move", x, y}` in 0..1 monitor coordinates, `{kind:"mouse_button",
+button, pressed}`, `{kind:"wheel", delta, horizontal?}`, or `{kind:"key", vk, pressed}`.
+
+- A request is accepted only while the host is sharing and no other grant is active.
+- Leases are clamped to 5–60 minutes (30 default); both ends enforce expiry, and the host also
+  revokes after 15 s without a heartbeat.
+- Alt+F4 is filtered on the host; all held keys/buttons are released when control ends by any
+  path. Control never affects the host outside an active lease.
 
 ---
 

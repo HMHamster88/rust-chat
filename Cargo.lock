@@ -3308,6 +3308,7 @@ dependencies = [
  "rust-chat-media-desktop",
  "rust-chat-protocol",
  "rust-chat-server",
+ "serde",
  "serde_json",
  "tokio",
  "windows 0.61.3",
@@ -3347,6 +3348,7 @@ dependencies = [
  "sonora",
  "thiserror 2.0.21",
  "tokio",
+ "windows 0.61.3",
  "windows-capture",
 ]
 

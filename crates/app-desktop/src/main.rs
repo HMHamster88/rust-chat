@@ -3,11 +3,17 @@
 #![cfg(windows)]
 
 use ferroui_base::collections::FerroList;
+use ferroui_base::input::{
+    InputElement, Key, KeyEventArgs, PointerEventArgs, PointerPressedEventArgs,
+    PointerReleasedEventArgs, PointerWheelEventArgs,
+};
+use ferroui_base::interactivity::RoutedEventHandlerToken;
 use ferroui_base::layout::{HorizontalAlignment, Orientation, VerticalAlignment};
+use ferroui_base::media::Brushes;
 use ferroui_base::threading::{DispatcherPriority, DispatcherTimer};
 use ferroui_base::{FerroObjectImpl, Ref, Thickness, ferro_class, ferro_impl_classes, instantiate};
 use ferroui_controls::{
-    AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Button, CheckBox, Control,
+    AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Button, CheckBox, Control, Grid,
     ItemsSource, ListBox, NewApplication, StackPanel, TextBlock, TextBox, Window,
 };
 use ferroui_desktop::AppBuilderDesktopExtensions;
@@ -17,6 +23,7 @@ use ferroui_themes_fluent::FluentTheme;
 use rust_chat_client_core::{
     ChatSnapshot, ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
 };
+use rust_chat_desktop::control::{DEFAULT_LEASE_SECS, InputEvent, RemoteButton, countdown};
 use rust_chat_desktop::video_surface::{VideoSurface, build_presenter};
 use rust_chat_desktop::voice::{self, VoiceCommand, VoiceController, VoiceEvent};
 use rust_chat_media_desktop::audio::AudioIo;
@@ -73,6 +80,9 @@ impl ApplicationImpl for App {
     }
 }
 
+const PRESENTER_WIDTH: f64 = 640.0;
+const PRESENTER_HEIGHT: f64 = 360.0;
+
 struct VoiceRuntime {
     audio: AudioIo,
     controller: VoiceController,
@@ -123,11 +133,27 @@ struct Ui {
     mute_mic: Ref<Button>,
     mute_speaker: Ref<Button>,
     share: Ref<Button>,
+    request_control: Ref<Button>,
+    stop_control: Ref<Button>,
+    allow_control: Ref<Button>,
+    deny_control: Ref<Button>,
+    control_status: Ref<TextBlock>,
+    control_pending: Cell<bool>,
+    control_peer: RefCell<Option<String>>,
+    control_until: Cell<Option<Instant>>,
+    control_host_peer: RefCell<Option<String>>,
+    control_host_until: Cell<Option<Instant>>,
+    control_request: RefCell<Option<(String, u64)>>,
+    last_mouse: Cell<Instant>,
+    input_tokens: RefCell<Vec<RoutedEventHandlerToken>>,
+    control_line: RefCell<String>,
     presenter: Ref<TexturePresenter>,
+    video_host: Ref<Grid>,
     surface: Rc<RefCell<VideoSurface>>,
     _presenter_sub: RefCell<Option<MediaSubscription>>,
     last_video: RefCell<Option<Instant>>,
     video_visible: Cell<bool>,
+    video_label: Ref<TextBlock>,
     voice_status: Ref<TextBlock>,
     voice_note: RefCell<Option<String>>,
     voice_line: RefCell<String>,
@@ -268,11 +294,13 @@ impl Ui {
         let _ = self.client.set_presence(Some(true), Some(false), None);
         *self.voice_note.borrow_mut() = Some("joining (microphone muted)".to_owned());
         self.voice_wanted.set(true);
+        self.clear_control();
         *self.voice_room_id.borrow_mut() = Some(room.room.id.clone());
     }
 
     fn leave_voice(&self, reason: Option<&str>) {
         self.voice_wanted.set(false);
+        self.clear_control();
         let taken = self.voice.borrow_mut().take();
         if let Some(mut runtime) = taken {
             runtime.controller.send(VoiceCommand::Stop);
@@ -364,10 +392,247 @@ impl Ui {
         }
         self.video_visible.set(visible);
         self.presenter.set_is_visible(visible);
+        self.video_host.set_is_visible(visible);
+        self.video_label.set_is_visible(visible);
         if !visible {
             *self.last_video.borrow_mut() = None;
         }
     }
+
+    fn controlling(&self) -> bool {
+        self.control_peer.borrow().is_some()
+            && self
+                .control_until
+                .get()
+                .is_some_and(|until| Instant::now() < until)
+    }
+
+    fn member_name(&self, id: &str) -> String {
+        self.client
+            .snapshot()
+            .room
+            .as_ref()
+            .and_then(|room| {
+                room.members
+                    .iter()
+                    .find(|member| member.session_id == id)
+                    .map(|member| member.name.clone())
+            })
+            .unwrap_or_else(|| id.to_owned())
+    }
+
+    fn send_voice_command(&self, command: VoiceCommand) {
+        if let Some(runtime) = self.voice.borrow().as_ref() {
+            runtime.controller.send(command);
+        }
+    }
+
+    fn request_control(&self) {
+        let snapshot = self.client.snapshot();
+        let Some(room) = snapshot.room.as_ref() else {
+            return;
+        };
+        let Some(presenter) = room
+            .members
+            .iter()
+            .find(|member| member.sharing && member.session_id != room.self_member.session_id)
+        else {
+            *self.voice_note.borrow_mut() = Some("nobody is sharing".to_owned());
+            return;
+        };
+        self.send_voice_command(VoiceCommand::ControlRequest {
+            peer: presenter.session_id.clone(),
+            lease_secs: DEFAULT_LEASE_SECS,
+        });
+        self.control_pending.set(true);
+        *self.voice_note.borrow_mut() =
+            Some(format!("waiting for {} to allow control", presenter.name));
+    }
+
+    fn respond_control(&self, allow: bool) {
+        let Some((peer, lease_secs)) = self.control_request.borrow_mut().take() else {
+            return;
+        };
+        self.send_voice_command(VoiceCommand::ControlRespond {
+            peer,
+            allow,
+            lease_secs,
+        });
+        if !allow {
+            *self.voice_note.borrow_mut() = Some("control denied".to_owned());
+        }
+    }
+
+    fn stop_control(&self) {
+        self.send_voice_command(VoiceCommand::ControlStop);
+        self.clear_control();
+        *self.voice_note.borrow_mut() = Some("control stopped".to_owned());
+    }
+
+    fn clear_control(&self) {
+        self.control_pending.set(false);
+        *self.control_peer.borrow_mut() = None;
+        self.control_until.set(None);
+        *self.control_host_peer.borrow_mut() = None;
+        self.control_host_until.set(None);
+        *self.control_request.borrow_mut() = None;
+    }
+
+    fn send_input(&self, event: InputEvent) {
+        if !self.controlling() {
+            return;
+        }
+        self.send_voice_command(VoiceCommand::ControlInput(event));
+    }
+
+    fn on_pointer_moved(&self, e: &PointerEventArgs) {
+        if !self.controlling() {
+            return;
+        }
+        if self.last_mouse.get().elapsed() < Duration::from_millis(16) {
+            return;
+        }
+        self.last_mouse.set(Instant::now());
+        let point = e.get_position(Some(&*self.video_host));
+        if std::env::var("RUST_CHAT_CONTROL_DEBUG").is_ok() {
+            eprintln!("pointer move {:?}", (point.x, point.y));
+        }
+        let x = (point.x / PRESENTER_WIDTH).clamp(0.0, 1.0) as f32;
+        let y = (point.y / PRESENTER_HEIGHT).clamp(0.0, 1.0) as f32;
+        self.send_input(InputEvent::MouseMove { x, y });
+    }
+
+    fn on_pointer_pressed(&self, e: &PointerPressedEventArgs) {
+        if !self.controlling() {
+            return;
+        }
+        self.presenter.focus();
+        let properties = e.get_current_point(None).properties;
+        let button = if properties.is_left_button_pressed {
+            Some(RemoteButton::Left)
+        } else if properties.is_right_button_pressed {
+            Some(RemoteButton::Right)
+        } else if properties.is_middle_button_pressed {
+            Some(RemoteButton::Middle)
+        } else {
+            None
+        };
+        let Some(button) = button else {
+            return;
+        };
+        self.send_input(InputEvent::MouseButton {
+            button,
+            pressed: true,
+        });
+        e.set_handled(true);
+    }
+
+    fn on_pointer_released(&self, e: &PointerReleasedEventArgs) {
+        if !self.controlling() {
+            return;
+        }
+        let Some(button) = remote_button(e.initial_press_mouse_button()) else {
+            return;
+        };
+        self.send_input(InputEvent::MouseButton {
+            button,
+            pressed: false,
+        });
+        e.set_handled(true);
+    }
+
+    fn on_pointer_wheel(&self, e: &PointerWheelEventArgs) {
+        if !self.controlling() {
+            return;
+        }
+        let delta = e.delta();
+        if delta.y != 0.0 {
+            self.send_input(InputEvent::Wheel {
+                delta: (delta.y * 120.0) as i32,
+                horizontal: false,
+            });
+        }
+        if delta.x != 0.0 {
+            self.send_input(InputEvent::Wheel {
+                delta: (delta.x * 120.0) as i32,
+                horizontal: true,
+            });
+        }
+        e.set_handled(true);
+    }
+
+    fn on_key(&self, e: &KeyEventArgs, pressed: bool) {
+        if !self.controlling() {
+            return;
+        }
+        let Some(vk) = virtual_key(e.key, e.key_symbol.as_deref()) else {
+            return;
+        };
+        self.send_input(InputEvent::Key { vk, pressed });
+        e.set_handled(true);
+    }
+}
+
+fn remote_button(button: ferroui_base::input::MouseButton) -> Option<RemoteButton> {
+    match button {
+        ferroui_base::input::MouseButton::Left => Some(RemoteButton::Left),
+        ferroui_base::input::MouseButton::Right => Some(RemoteButton::Right),
+        ferroui_base::input::MouseButton::Middle => Some(RemoteButton::Middle),
+        _ => None,
+    }
+}
+
+/// WPF-style `Key` values to Windows virtual-key codes, with `VkKeyScanW` for printable keys.
+fn virtual_key(key: Key, symbol: Option<&str>) -> Option<u16> {
+    if let Some(ch) = symbol.and_then(|symbol| symbol.chars().next())
+        && ch.is_ascii()
+        && !ch.is_control()
+    {
+        let scan = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW(ch as u16) };
+        if scan != -1 {
+            return Some((scan & 0xFF) as u16);
+        }
+    }
+    let value = key as u32;
+    let vk = if (44..=69).contains(&value) {
+        0x41 + (value - 44) as u16
+    } else if (34..=43).contains(&value) {
+        0x30 + (value - 34) as u16
+    } else if (74..=83).contains(&value) {
+        0x60 + (value - 74) as u16
+    } else if (90..=101).contains(&value) {
+        0x70 + (value - 90) as u16
+    } else {
+        match key {
+            Key::Escape => 0x1B,
+            Key::Tab => 0x09,
+            Key::Back => 0x08,
+            Key::Return => 0x0D,
+            Key::Space => 0x20,
+            Key::Insert => 0x2D,
+            Key::Delete => 0x2E,
+            Key::Home => 0x24,
+            Key::End => 0x23,
+            Key::PageUp => 0x21,
+            Key::PageDown => 0x22,
+            Key::Left => 0x25,
+            Key::Up => 0x26,
+            Key::Right => 0x27,
+            Key::Down => 0x28,
+            Key::LeftShift => 0xA0,
+            Key::RightShift => 0xA1,
+            Key::LeftCtrl => 0xA2,
+            Key::RightCtrl => 0xA3,
+            Key::LeftAlt => 0xA4,
+            Key::RightAlt => 0xA5,
+            Key::LWin => 0x5B,
+            Key::RWin => 0x5C,
+            Key::CapsLock => 0x14,
+            Key::Pause => 0x13,
+            _ => return None,
+        }
+    };
+    Some(vk)
 }
 
 fn create_main_window() -> Ref<Window> {
@@ -461,6 +726,25 @@ fn create_main_window() -> Ref<Window> {
     mute_speaker.set_content(Some(Rc::new("Mute speakers".to_string())));
     let share = Button::new();
     share.set_content(Some(Rc::new("Share screen".to_string())));
+    let request_control = Button::new();
+    request_control.set_content(Some(Rc::new("Request control".to_string())));
+    request_control.set_is_visible(false);
+    let stop_control = Button::new();
+    stop_control.set_content(Some(Rc::new("Stop control".to_string())));
+    stop_control.set_is_visible(false);
+    let allow_control = Button::new();
+    allow_control.set_content(Some(Rc::new("Allow 30 min".to_string())));
+    allow_control.set_is_visible(false);
+    let deny_control = Button::new();
+    deny_control.set_content(Some(Rc::new("Deny".to_string())));
+    deny_control.set_is_visible(false);
+    let control_status = text("", 13.0);
+    let control_row = row();
+    control_row.children().add(request_control.clone());
+    control_row.children().add(stop_control.clone());
+    control_row.children().add(allow_control.clone());
+    control_row.children().add(deny_control.clone());
+    control_row.children().add(control_status.clone());
     let voice_status = text("voice: off", 13.0);
     let voice_row = row();
     voice_row.children().add(join_voice.clone());
@@ -478,6 +762,15 @@ fn create_main_window() -> Ref<Window> {
     presenter.set_height(360.0);
     presenter.set_horizontal_alignment(HorizontalAlignment::Center);
     presenter.set_is_visible(false);
+    let video_host = Grid::new();
+    video_host.set_width(640.0);
+    video_host.set_height(360.0);
+    video_host.set_horizontal_alignment(HorizontalAlignment::Center);
+    video_host.set_background(Some(Brushes::transparent()));
+    video_host.set_is_visible(false);
+    video_host.children().add(presenter.clone());
+    let video_label = text("SCREEN SHARE", 12.0);
+    video_label.set_is_visible(false);
 
     let message_model = Rc::new(FerroList::new());
     let message_list = ListBox::new();
@@ -504,11 +797,13 @@ fn create_main_window() -> Ref<Window> {
     room_panel.children().add(room_header);
     room_panel.children().add(room_actions);
     room_panel.children().add(voice_row);
+    room_panel.children().add(control_row);
     room_panel.children().add(text("ROOMS", 12.0));
     room_panel.children().add(rooms_panel.clone());
     room_panel.children().add(text("MEMBERS", 12.0));
     room_panel.children().add(members.clone());
-    room_panel.children().add(presenter.clone());
+    room_panel.children().add(video_label.clone());
+    room_panel.children().add(video_host.clone());
     room_panel.children().add(message_list);
     room_panel.children().add(composer_row);
     room_panel.set_is_visible(false);
@@ -556,11 +851,27 @@ fn create_main_window() -> Ref<Window> {
         mute_mic,
         mute_speaker,
         share,
+        request_control,
+        stop_control,
+        allow_control,
+        deny_control,
+        control_status,
+        control_pending: Cell::new(false),
+        control_peer: RefCell::new(None),
+        control_until: Cell::new(None),
+        control_host_peer: RefCell::new(None),
+        control_host_until: Cell::new(None),
+        control_request: RefCell::new(None),
+        last_mouse: Cell::new(Instant::now()),
+        input_tokens: RefCell::new(Vec::new()),
+        control_line: RefCell::new(String::new()),
         presenter,
+        video_host,
         surface,
         _presenter_sub: RefCell::new(Some(presenter_sub)),
         last_video: RefCell::new(None),
         video_visible: Cell::new(false),
+        video_label,
         voice_status,
         voice_note: RefCell::new(None),
         voice_line: RefCell::new(String::new()),
@@ -570,6 +881,7 @@ fn create_main_window() -> Ref<Window> {
     });
 
     wire(&ui);
+    attach_control_input(&ui);
     let timer =
         DispatcherTimer::with_callback(Duration::from_millis(100), DispatcherPriority::NORMAL, {
             let ui = ui.clone();
@@ -701,6 +1013,105 @@ fn wire(ui: &Rc<Ui>) {
             }
         }
     });
+    ui.request_control.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.request_control();
+            }
+        }
+    });
+    ui.stop_control.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.stop_control();
+            }
+        }
+    });
+    ui.allow_control.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.respond_control(true);
+            }
+        }
+    });
+    ui.deny_control.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.respond_control(false);
+            }
+        }
+    });
+}
+
+fn attach_control_input(ui: &Rc<Ui>) {
+    ui.presenter.set_focusable(true);
+    ui.presenter.set_is_tab_stop(true);
+    let mut tokens = Vec::new();
+    tokens.push(
+        ui.video_host
+            .add_handler(InputElement::pointer_moved_event(), {
+                let weak = Rc::downgrade(ui);
+                move |_, e| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.on_pointer_moved(e);
+                    }
+                }
+            }),
+    );
+    tokens.push(
+        ui.video_host
+            .add_handler(InputElement::pointer_pressed_event(), {
+                let weak = Rc::downgrade(ui);
+                move |_, e| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.on_pointer_pressed(e);
+                    }
+                }
+            }),
+    );
+    tokens.push(
+        ui.video_host
+            .add_handler(InputElement::pointer_released_event(), {
+                let weak = Rc::downgrade(ui);
+                move |_, e| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.on_pointer_released(e);
+                    }
+                }
+            }),
+    );
+    tokens.push(
+        ui.video_host
+            .add_handler(InputElement::pointer_wheel_changed_event(), {
+                let weak = Rc::downgrade(ui);
+                move |_, e| {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.on_pointer_wheel(e);
+                    }
+                }
+            }),
+    );
+    tokens.push(ui.presenter.add_handler(InputElement::key_down_event(), {
+        let weak = Rc::downgrade(ui);
+        move |_, e| {
+            if let Some(ui) = weak.upgrade() {
+                ui.on_key(e, true);
+            }
+        }
+    }));
+    tokens.push(ui.presenter.add_handler(InputElement::key_up_event(), {
+        let weak = Rc::downgrade(ui);
+        move |_, e| {
+            if let Some(ui) = weak.upgrade() {
+                ui.on_key(e, false);
+            }
+        }
+    }));
+    ui.input_tokens.borrow_mut().extend(tokens);
 }
 
 fn refresh(ui: &Rc<Ui>) {
@@ -910,6 +1321,28 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
                         };
                         runtime.stats.borrow_mut().insert(peer, label);
                     }
+                    Some(VoiceEvent::ControlRequested { peer, lease_secs }) => {
+                        *ui.control_request.borrow_mut() = Some((peer, lease_secs));
+                        *ui.voice_note.borrow_mut() =
+                            Some("a participant requests remote control".to_owned());
+                    }
+                    Some(VoiceEvent::ControlGranted { peer, lease_secs }) => {
+                        ui.control_pending.set(false);
+                        *ui.control_peer.borrow_mut() = Some(peer);
+                        ui.control_until
+                            .set(Some(Instant::now() + Duration::from_secs(lease_secs)));
+                        *ui.voice_note.borrow_mut() = Some("remote control granted".to_owned());
+                    }
+                    Some(VoiceEvent::ControlHosting { peer, lease_secs }) => {
+                        *ui.control_host_peer.borrow_mut() = Some(peer);
+                        ui.control_host_until
+                            .set(Some(Instant::now() + Duration::from_secs(lease_secs)));
+                        *ui.voice_note.borrow_mut() = Some("remote control active".to_owned());
+                    }
+                    Some(VoiceEvent::ControlEnded { reason }) => {
+                        ui.clear_control();
+                        *ui.voice_note.borrow_mut() = Some(format!("control ended: {reason}"));
+                    }
                     Some(VoiceEvent::PeerFailed(error)) => peer_error = Some(error),
                     Some(VoiceEvent::Error(error)) => {
                         ended = Some(format!("audio failed: {error}"));
@@ -960,6 +1393,47 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.mute_mic.set_is_visible(active);
     ui.mute_speaker.set_is_visible(active);
     ui.share.set_is_visible(active);
+
+    let presenting = room
+        .members
+        .iter()
+        .any(|member| member.sharing && member.session_id != room.self_member.session_id);
+    let controlling = ui.controlling();
+    let hosting = ui.control_host_peer.borrow().is_some();
+    let pending = ui.control_pending.get();
+    let requested = ui.control_request.borrow().is_some();
+    ui.request_control
+        .set_is_visible(active && presenting && !controlling && !hosting && !pending && !requested);
+    ui.stop_control
+        .set_is_visible(active && (controlling || hosting || pending));
+    ui.allow_control.set_is_visible(requested && active);
+    ui.deny_control.set_is_visible(requested && active);
+
+    let control_text = if let Some((peer, _)) = ui.control_request.borrow().as_ref() {
+        format!("{} requests remote control", ui.member_name(peer))
+    } else if let Some(until) = ui.control_until.get() {
+        let peer = ui.control_peer.borrow().clone().unwrap_or_default();
+        format!(
+            "controlling {} \u{2014} {}",
+            ui.member_name(&peer),
+            countdown(until.saturating_duration_since(Instant::now()).as_secs())
+        )
+    } else if let Some(until) = ui.control_host_until.get() {
+        let peer = ui.control_host_peer.borrow().clone().unwrap_or_default();
+        format!(
+            "{} is controlling \u{2014} {}",
+            ui.member_name(&peer),
+            countdown(until.saturating_duration_since(Instant::now()).as_secs())
+        )
+    } else if pending {
+        "waiting for approval".to_owned()
+    } else {
+        String::new()
+    };
+    if *ui.control_line.borrow() != control_text {
+        *ui.control_line.borrow_mut() = control_text.clone();
+        ui.control_status.set_text(Some(&control_text));
+    }
 
     let note = ui
         .voice_note

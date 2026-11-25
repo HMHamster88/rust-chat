@@ -5,12 +5,16 @@
 //! session id creates the offer; the other side answers. SDP carries its host
 //! candidates inline, so no trickle ICE is needed.
 
+use crate::control::{
+    ControlMessage, HEARTBEAT_SECS, HEARTBEAT_TIMEOUT_SECS, InputEvent, RemoteButton, lease_secs,
+};
 use rust_chat_client_core::{ClientHandle, IncomingSignal};
 use rust_chat_media::audio::{FRAME_SAMPLES, rms};
 use rust_chat_media::video::{VideoEncoder, bgra_to_i420, fit_bgra, i420_to_bgra};
 use rust_chat_media::voice::{VoicePeer, turn_ice_servers};
 use rust_chat_media_desktop::audio::{AudioEvent, AudioHandle, Playout};
-use rust_chat_media_desktop::capture::{CapturedFrame, ScreenCapture};
+use rust_chat_media_desktop::capture::{CapturedFrame, ScreenCapture, monitor_rect};
+use rust_chat_media_desktop::input::InputInjector;
 use rust_chat_protocol::payloads::TurnCredentials;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -65,6 +69,17 @@ pub enum VoiceCommand {
     MicMuted(bool),
     SpeakerMuted(bool),
     Share(bool),
+    ControlRequest {
+        peer: String,
+        lease_secs: u64,
+    },
+    ControlRespond {
+        peer: String,
+        allow: bool,
+        lease_secs: u64,
+    },
+    ControlInput(InputEvent),
+    ControlStop,
     Stop,
 }
 
@@ -82,6 +97,21 @@ pub enum VoiceEvent {
         relayed: bool,
     },
     PeerFailed(String),
+    ControlRequested {
+        peer: String,
+        lease_secs: u64,
+    },
+    ControlGranted {
+        peer: String,
+        lease_secs: u64,
+    },
+    ControlHosting {
+        peer: String,
+        lease_secs: u64,
+    },
+    ControlEnded {
+        reason: String,
+    },
     Ended,
     Error(String),
 }
@@ -126,6 +156,7 @@ pub fn start(
     let (down_tx, down_rx) = mpsc::unbounded_channel();
     let (up_tx, up_rx) = mpsc::unbounded_channel();
     let (wake_tx, wake_rx) = mpsc::unbounded_channel();
+    let (control_tx, control_rx) = mpsc::unbounded_channel();
     let force_keyframe = Arc::new(AtomicBool::new(false));
     let video = VideoSink::default();
     runtime.spawn(share_task(
@@ -154,6 +185,14 @@ pub fn start(
         wake_rx,
         force_keyframe,
         turn,
+        sharing: false,
+        control_in: control_tx,
+        control_out: control_rx,
+        viewer: None,
+        viewer_pending: None,
+        host: None,
+        pending: None,
+        injector: None,
         local: local_tx,
         video: video_tx,
         share: share_tx,
@@ -172,11 +211,24 @@ pub fn start(
 
 struct PeerHandle {
     signals: mpsc::UnboundedSender<PeerSignal>,
+    control: mpsc::UnboundedSender<ControlMessage>,
     task: JoinHandle<()>,
 }
 
 enum PeerSignal {
     Answer(String),
+}
+
+struct ViewerControl {
+    peer: String,
+    until: Instant,
+    last_heartbeat: Instant,
+}
+
+struct HostControl {
+    peer: String,
+    until: Instant,
+    last_heartbeat: Instant,
 }
 
 struct VoiceRun {
@@ -197,6 +249,14 @@ struct VoiceRun {
     wake_rx: mpsc::UnboundedReceiver<String>,
     force_keyframe: Arc<AtomicBool>,
     turn: Option<TurnCredentials>,
+    sharing: bool,
+    control_in: mpsc::UnboundedSender<(String, ControlMessage)>,
+    control_out: mpsc::UnboundedReceiver<(String, ControlMessage)>,
+    viewer: Option<ViewerControl>,
+    viewer_pending: Option<String>,
+    host: Option<HostControl>,
+    pending: Option<(String, u64)>,
+    injector: Option<InputInjector>,
     local: broadcast::Sender<Vec<i16>>,
     video: broadcast::Sender<Arc<Vec<u8>>>,
     share: mpsc::UnboundedSender<bool>,
@@ -209,8 +269,11 @@ struct VoiceRun {
 impl VoiceRun {
     async fn run(mut self) {
         self.presence();
+        let mut control_tick = tokio::time::interval(Duration::from_secs(1));
+        control_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
+                _ = control_tick.tick() => self.control_tick(),
                 command = self.commands.recv() => match command {
                     Some(VoiceCommand::Members(members)) => self.sync_members(members),
                     Some(VoiceCommand::MicMuted(muted)) => {
@@ -224,12 +287,24 @@ impl VoiceRun {
                         self.presence();
                     }
                     Some(VoiceCommand::Share(on)) => {
+                        self.sharing = on;
                         let _ = self.share.send(on);
                         self.client.set_presence(None, None, Some(on));
                         if !on {
                             self.sink.clear();
+                            self.stop_control("sharing stopped");
                         }
                     }
+                    Some(VoiceCommand::ControlRequest { peer, lease_secs }) => {
+                        self.request_control(peer, lease_secs);
+                    }
+                    Some(VoiceCommand::ControlRespond {
+                        peer,
+                        allow,
+                        lease_secs,
+                    }) => self.respond_control(peer, allow, lease_secs),
+                    Some(VoiceCommand::ControlInput(event)) => self.control_input(event),
+                    Some(VoiceCommand::ControlStop) => self.stop_control("stopped"),
                     Some(VoiceCommand::Stop) | None => break,
                 },
                 signal = self.signals.recv() => match signal {
@@ -237,6 +312,11 @@ impl VoiceRun {
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
+                message = self.control_out.recv() => {
+                    if let Some((from, message)) = message {
+                        self.on_control(from, message);
+                    }
+                }
                 down = self.down_rx.recv() => {
                     if let Some((id, error)) = down {
                         self.peer_down(id, error);
@@ -320,6 +400,15 @@ impl VoiceRun {
         if self.peers.remove(&id).is_none() {
             return;
         }
+        if self.viewer.as_ref().is_some_and(|viewer| viewer.peer == id) {
+            self.end_viewer("the host disconnected", false);
+        }
+        if self.host.as_ref().is_some_and(|host| host.peer == id) {
+            self.end_host("the controller disconnected", false);
+        }
+        if self.pending.as_ref().is_some_and(|(peer, _)| *peer == id) {
+            self.pending = None;
+        }
         if !self.members.contains(&id) {
             self.retries.remove(&id);
             return;
@@ -356,6 +445,7 @@ impl VoiceRun {
 
     fn add_offerer(&mut self, id: String) {
         let (signal_tx, signal_rx) = mpsc::unbounded_channel();
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
         let client = self.client.clone();
         let local = self.local.subscribe();
         let video = self.video.subscribe();
@@ -365,6 +455,7 @@ impl VoiceRun {
         let down = self.down.clone();
         let up = self.up.clone();
         let turn = self.turn.clone();
+        let control_in = self.control_in.clone();
         let peer_id = id.clone();
         let task = tokio::spawn(async move {
             let result = run_peer(
@@ -379,6 +470,8 @@ impl VoiceRun {
                 events,
                 turn,
                 up,
+                control_in,
+                control_rx,
             )
             .await;
             if result.is_err() {
@@ -390,6 +483,7 @@ impl VoiceRun {
             id,
             PeerHandle {
                 signals: signal_tx,
+                control: control_tx,
                 task,
             },
         );
@@ -397,6 +491,7 @@ impl VoiceRun {
 
     fn add_answerer(&mut self, id: String, sdp: String) {
         let (signal_tx, signal_rx) = mpsc::unbounded_channel();
+        let (control_tx, control_rx) = mpsc::unbounded_channel();
         let client = self.client.clone();
         let local = self.local.subscribe();
         let video = self.video.subscribe();
@@ -406,6 +501,7 @@ impl VoiceRun {
         let down = self.down.clone();
         let up = self.up.clone();
         let turn = self.turn.clone();
+        let control_in = self.control_in.clone();
         let peer_id = id.clone();
         let task = tokio::spawn(async move {
             let result = run_peer(
@@ -420,6 +516,8 @@ impl VoiceRun {
                 events,
                 turn,
                 up,
+                control_in,
+                control_rx,
             )
             .await;
             if result.is_err() {
@@ -431,6 +529,7 @@ impl VoiceRun {
             id,
             PeerHandle {
                 signals: signal_tx,
+                control: control_tx,
                 task,
             },
         );
@@ -475,6 +574,8 @@ impl VoiceRun {
     }
 
     fn shutdown(&mut self) {
+        self.end_viewer("voice ended", true);
+        self.end_host("voice ended", true);
         for (id, peer) in self.peers.drain() {
             self.client.send_signal(&id, json!({ "kind": "bye" }));
             peer.task.abort();
@@ -484,6 +585,284 @@ impl VoiceRun {
         self.client.set_presence(None, None, Some(false));
         self.client.set_voice(false);
         let _ = self.events.send(VoiceEvent::Ended);
+    }
+
+    fn send_control(&self, peer: &str, message: ControlMessage) {
+        if let Some(handle) = self.peers.get(peer) {
+            let _ = handle.control.send(message);
+        }
+    }
+
+    fn request_control(&mut self, peer: String, requested: u64) {
+        if self.viewer.is_some() || self.viewer_pending.is_some() || self.host.is_some() {
+            return;
+        }
+        let secs = lease_secs(requested);
+        self.send_control(&peer, ControlMessage::Request { lease_secs: secs });
+        self.viewer_pending = Some(peer);
+    }
+
+    fn respond_control(&mut self, peer: String, allow: bool, requested: u64) {
+        let Some((pending, _)) = self.pending.clone() else {
+            return;
+        };
+        if pending != peer {
+            return;
+        }
+        self.pending = None;
+        if !allow {
+            self.send_control(
+                &peer,
+                ControlMessage::Deny {
+                    reason: "declined".into(),
+                },
+            );
+            let _ = self.events.send(VoiceEvent::ControlEnded {
+                reason: "declined".into(),
+            });
+            return;
+        }
+        let rect = match monitor_rect(1) {
+            Ok(rect) => rect,
+            Err(error) => {
+                self.send_control(
+                    &peer,
+                    ControlMessage::Deny {
+                        reason: format!("cannot map the monitor: {error}"),
+                    },
+                );
+                return;
+            }
+        };
+        let secs = lease_secs(requested);
+        self.injector = Some(
+            if std::env::var("RUST_CHAT_CONTROL_DRY_RUN").as_deref() == Ok("1") {
+                InputInjector::dry_run(rect)
+            } else {
+                InputInjector::new(rect)
+            },
+        );
+        self.host = Some(HostControl {
+            peer: peer.clone(),
+            until: Instant::now() + Duration::from_secs(secs),
+            last_heartbeat: Instant::now(),
+        });
+        self.send_control(&peer, ControlMessage::Grant { lease_secs: secs });
+        let _ = self.events.send(VoiceEvent::ControlHosting {
+            peer,
+            lease_secs: secs,
+        });
+    }
+
+    fn on_control(&mut self, from: String, message: ControlMessage) {
+        let now = Instant::now();
+        match message {
+            ControlMessage::Request {
+                lease_secs: requested,
+            } => {
+                if !self.sharing || self.host.is_some() || self.pending.is_some() {
+                    let reason = if self.sharing {
+                        "a controller is already connected"
+                    } else {
+                        "the host is not sharing"
+                    };
+                    self.send_control(
+                        &from,
+                        ControlMessage::Deny {
+                            reason: reason.into(),
+                        },
+                    );
+                    return;
+                }
+                let secs = lease_secs(requested);
+                self.pending = Some((from.clone(), secs));
+                let _ = self.events.send(VoiceEvent::ControlRequested {
+                    peer: from,
+                    lease_secs: secs,
+                });
+            }
+            ControlMessage::Grant {
+                lease_secs: granted,
+            } => {
+                if self.viewer_pending.as_deref() == Some(from.as_str()) {
+                    self.viewer_pending = None;
+                    let secs = lease_secs(granted);
+                    self.viewer = Some(ViewerControl {
+                        peer: from.clone(),
+                        until: now + Duration::from_secs(secs),
+                        last_heartbeat: now,
+                    });
+                    let _ = self.events.send(VoiceEvent::ControlGranted {
+                        peer: from,
+                        lease_secs: secs,
+                    });
+                }
+            }
+            ControlMessage::Deny { reason } | ControlMessage::End { reason } => {
+                if self.viewer_pending.as_deref() == Some(from.as_str()) {
+                    self.viewer_pending = None;
+                }
+                if self
+                    .viewer
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.peer == from)
+                {
+                    self.viewer = None;
+                    let _ = self.events.send(VoiceEvent::ControlEnded {
+                        reason: reason.clone(),
+                    });
+                }
+                if self.host.as_ref().is_some_and(|host| host.peer == from) {
+                    self.end_host("the controller stopped", false);
+                    let _ = self.events.send(VoiceEvent::ControlEnded { reason });
+                }
+            }
+            ControlMessage::Revoke { reason } => {
+                if self
+                    .viewer
+                    .as_ref()
+                    .is_some_and(|viewer| viewer.peer == from)
+                {
+                    self.viewer = None;
+                    self.viewer_pending = None;
+                    let _ = self.events.send(VoiceEvent::ControlEnded { reason });
+                }
+                if self.host.as_ref().is_some_and(|host| host.peer == from) {
+                    self.end_host("revoked", false);
+                }
+            }
+            ControlMessage::Heartbeat => {
+                if let Some(host) = self.host.as_mut()
+                    && host.peer == from
+                {
+                    host.last_heartbeat = now;
+                }
+            }
+            ControlMessage::Input { event } => {
+                let allowed = self
+                    .host
+                    .as_ref()
+                    .is_some_and(|host| host.peer == from && now < host.until);
+                if allowed {
+                    self.inject(event);
+                }
+            }
+        }
+    }
+
+    fn inject(&mut self, event: InputEvent) {
+        let Some(injector) = self.injector.as_mut() else {
+            return;
+        };
+        let dry = injector.is_dry_run();
+        let start = injector.recorded.len();
+        match event {
+            InputEvent::MouseMove { x, y } => injector.mouse_move(x, y),
+            InputEvent::MouseButton { button, pressed } => {
+                let button = match button {
+                    RemoteButton::Left => rust_chat_media_desktop::input::MouseButton::Left,
+                    RemoteButton::Right => rust_chat_media_desktop::input::MouseButton::Right,
+                    RemoteButton::Middle => rust_chat_media_desktop::input::MouseButton::Middle,
+                };
+                injector.mouse_button(button, pressed);
+            }
+            InputEvent::Wheel { delta, horizontal } => injector.wheel(delta, horizontal),
+            InputEvent::Key { vk, pressed } => {
+                injector.key(vk, pressed);
+            }
+        }
+        if dry {
+            for event in &injector.recorded[start..] {
+                eprintln!("control input: {event}");
+            }
+        }
+    }
+
+    fn control_input(&mut self, event: InputEvent) {
+        let Some(viewer) = self.viewer.as_ref() else {
+            return;
+        };
+        if Instant::now() >= viewer.until {
+            return;
+        }
+        let peer = viewer.peer.clone();
+        self.send_control(&peer, ControlMessage::Input { event });
+    }
+
+    fn stop_control(&mut self, reason: &str) {
+        self.end_viewer(reason, true);
+        self.end_host(reason, true);
+    }
+
+    fn end_viewer(&mut self, reason: &str, notify: bool) {
+        if let Some(viewer) = self.viewer.take() {
+            if notify {
+                self.send_control(
+                    &viewer.peer,
+                    ControlMessage::End {
+                        reason: reason.into(),
+                    },
+                );
+            }
+            let _ = self.events.send(VoiceEvent::ControlEnded {
+                reason: reason.into(),
+            });
+        }
+        if let Some(pending) = self.viewer_pending.take()
+            && notify
+        {
+            self.send_control(
+                &pending,
+                ControlMessage::End {
+                    reason: reason.into(),
+                },
+            );
+        }
+    }
+
+    fn end_host(&mut self, reason: &str, notify: bool) {
+        if let Some(host) = self.host.take() {
+            if notify {
+                self.send_control(
+                    &host.peer,
+                    ControlMessage::Revoke {
+                        reason: reason.into(),
+                    },
+                );
+            }
+            if let Some(mut injector) = self.injector.take() {
+                injector.release_all();
+            }
+            let _ = self.events.send(VoiceEvent::ControlEnded {
+                reason: reason.into(),
+            });
+        }
+        self.pending = None;
+    }
+
+    fn control_tick(&mut self) {
+        let now = Instant::now();
+        if let Some(viewer) = self.viewer.as_mut() {
+            if now >= viewer.until {
+                self.end_viewer("lease expired", true);
+            } else if viewer.last_heartbeat.elapsed() >= Duration::from_secs(HEARTBEAT_SECS) {
+                viewer.last_heartbeat = now;
+                let peer = viewer.peer.clone();
+                self.send_control(&peer, ControlMessage::Heartbeat);
+            }
+        }
+        if let Some(host) = self.host.as_mut() {
+            if now >= host.until {
+                self.end_host("lease expired", true);
+            } else if host.last_heartbeat.elapsed() > Duration::from_secs(HEARTBEAT_TIMEOUT_SECS) {
+                self.end_host("the controller stopped responding", true);
+            }
+        }
+        if let Some((peer, _)) = self.pending.clone()
+            && !self.peers.contains_key(&peer)
+        {
+            self.pending = None;
+        }
     }
 }
 
@@ -505,6 +884,8 @@ async fn run_peer(
     events: mpsc::UnboundedSender<VoiceEvent>,
     turn: Option<TurnCredentials>,
     up: mpsc::UnboundedSender<String>,
+    control_in: mpsc::UnboundedSender<(String, ControlMessage)>,
+    mut control_out: mpsc::UnboundedReceiver<ControlMessage>,
 ) -> Result<(), String> {
     // `0.0.0.0:0` gathers one host candidate per interface, which is enough on a LAN.
     let bind = std::env::var("RUST_CHAT_MEDIA_UDP").unwrap_or_else(|_| "0.0.0.0:0".to_owned());
@@ -515,6 +896,9 @@ async fn run_peer(
 
     match offer {
         Offer::Create => {
+            peer.create_control()
+                .await
+                .map_err(|error| format!("control channel: {error}"))?;
             let sdp = peer
                 .create_offer()
                 .await
@@ -555,6 +939,9 @@ async fn run_peer(
     let mut video_lost = peer
         .take_video_lost()
         .ok_or_else(|| "the peer had no video loss signal".to_owned())?;
+    let mut control_rx = peer
+        .take_control()
+        .ok_or_else(|| "the peer had no control receiver".to_owned())?;
     let _ = up.send(id.clone());
     let _ = events.send(VoiceEvent::Ready(id.clone()));
     // A viewer joining mid-share should not wait for the periodic keyframe.
@@ -612,6 +999,18 @@ async fn run_peer(
                 Some(PeerSignal::Answer(_)) => {}
                 None => break,
             },
+            out = control_out.recv() => {
+                if let Some(message) = out {
+                    let _ = peer.send_control(&message.encode()).await;
+                }
+            }
+            incoming = control_rx.recv() => {
+                if let Some(text) = incoming
+                    && let Some(message) = ControlMessage::decode(&text)
+                {
+                    let _ = control_in.send((id.clone(), message));
+                }
+            }
             pcm = received.recv() => match pcm {
                 Some(pcm) => {
                     if last_level.elapsed() >= LEVEL_INTERVAL {

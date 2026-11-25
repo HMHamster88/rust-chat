@@ -12,9 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M4 complete (mesh polish: TURN, peer rebuild, PLI, stats, auto-rejoin, 4-peer churn).
-  Next: M5 remote control and the screen-share pickers. M0–M3 results and the M4 details are in
-  §11/§12; settings, update checker and device pickers remain.
+- **Status:** M5 remote control complete (control data channel, consent, 30-minute lease,
+  SendInput, Alt+F4 filter, release-all). Next: screen-share picker/resolution polish, then M6
+  files. M0–M4 results and the M5 details are in §11/§12.
 
 ---
 
@@ -402,5 +402,29 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 - Tests: 78 total (TURN credentials, 4-peer churn, keyframe plumbing), `clippy -D warnings` clean.
 - Remaining for M5+: live coturn relay test, monitor/window picker, resolution/fps settings,
   audio device pickers, remote-control lease.
+
+### M5 — remote control (2026-11-25)
+
+- **Transport.** The offerer creates a reliable, ordered `control` data channel before its offer;
+  the answerer adopts it in `on_data_channel`. Messages are small JSON objects:
+  `request`, `grant`, `deny`, `revoke`, `heartbeat`, `end`, and `input`.
+- **Consent and lease.** A viewer can request control only while someone else is presenting. The
+  host sees the requester's name and a 30-minute default (clamped to 5–60), then Allow or Deny.
+  Grants are one-controller-at-a-time. The viewer sends a heartbeat every 5 s; the host revokes
+  after 15 s of silence or when the lease expires, and either side can stop immediately.
+- **Input.** The viewer maps pointer, wheel and keyboard events inside the presenter to an
+  `input` message. The host injects them with `SendInput`: absolute mouse movement across the
+  virtual desktop, left/right/middle buttons, vertical/horizontal wheel, and virtual-key presses
+  derived from the WPF-style `Key` plus `VkKeyScanW` for printable characters. Alt+F4 is filtered;
+  all held keys and buttons are released on lease end, revoke, peer loss or shutdown.
+- **UI.** `Request control` on the viewer of a share, `Allow 30 min`/`Deny` on the host, a
+  countdown (`controlling X — 29:56` / `X is controlling — 29:56`), and `Stop control`.
+- **Verified with two real app instances** using a dry-run injector on the host: pointer moves, a
+  click and an `A` keypress all arrived over the data channel and mapped to the shared monitor
+  (the log showed `move 1920,1077`, `button Left true/false`, `key 0x41 true/false`).
+- Tests: data-channel round trip, control message schema, injector mapping, Alt+F4 filtering and
+  release-all. 84 workspace tests; `clippy -D warnings` clean.
+- Remaining: monitor/window picker, resolution/fps settings, repeated start/stop soak, and a live
+  (non-dry-run) input check on a second machine.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

@@ -280,10 +280,13 @@ impl AudioIo {
                     // Let the echo canceller know exactly what is leaving the speakers.
                     let mut rendered = Vec::with_capacity(source.len());
                     if let Ok(mut apm) = processor.lock() {
-                        for chunk in source.chunks(APM_SAMPLES) {
+                        for chunk in source.as_chunks::<APM_SAMPLES>().0 {
                             let mut output = vec![0.0f32; chunk.len()];
                             if apm
-                                .process_render_f32(&[chunk], &mut [output.as_mut_slice()])
+                                .process_render_f32(
+                                    &[chunk.as_slice()],
+                                    &mut [output.as_mut_slice()],
+                                )
                                 .is_ok()
                             {
                                 rendered.extend_from_slice(&output);

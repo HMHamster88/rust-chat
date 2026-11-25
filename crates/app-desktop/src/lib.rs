@@ -2,5 +2,6 @@
 
 #![cfg(windows)]
 
+pub mod control;
 pub mod video_surface;
 pub mod voice;

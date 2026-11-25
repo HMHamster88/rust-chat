@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
@@ -153,4 +154,23 @@ impl Drop for ScreenCapture {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+/// Position and size of a monitor in virtual-desktop pixels.
+pub fn monitor_rect(index: usize) -> Result<crate::input::ScreenRect, String> {
+    let monitor = Monitor::from_index(index).map_err(|error| error.to_string())?;
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetMonitorInfoW(HMONITOR(monitor.as_raw_hmonitor()), &mut info) }
+        .ok()
+        .map_err(|error| error.to_string())?;
+    let rect = info.rcMonitor;
+    Ok(crate::input::ScreenRect {
+        x: rect.left,
+        y: rect.top,
+        width: (rect.right - rect.left) as u32,
+        height: (rect.bottom - rect.top) as u32,
+    })
 }
