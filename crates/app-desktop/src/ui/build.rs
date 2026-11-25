@@ -232,8 +232,8 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     members_panel.set_spacing(2.0);
     let rooms_panel = StackPanel::new();
     rooms_panel.set_spacing(4.0);
-    let join_voice = icons::icon_button(icons::Icon::Microphone, "Join voice");
-    let leave_voice = icons::icon_button(icons::Icon::Disconnect, "Leave voice");
+    let join_voice = icons::icon_button(icons::Icon::Phone, "Join voice");
+    let leave_voice = icons::icon_button(icons::Icon::PhoneOff, "Leave voice");
     let mute_mic = icons::icon_button(icons::Icon::MicrophoneOff, "Mute microphone");
     let mute_speaker = icons::icon_button(icons::Icon::Speaker, "Mute speakers");
     let share = icons::icon_button(icons::Icon::ShareScreen, "Share screen");
