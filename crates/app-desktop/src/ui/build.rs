@@ -420,9 +420,11 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     header_text.children().add(&room_title);
     header_text.children().add(&room_status);
     let header_actions = ui_kit::row(6.0);
+    header_actions.children().add(&mute_mic);
+    header_actions.children().add(&mute_speaker);
+    header_actions.children().add(&share);
     header_actions.children().add(&join_voice);
     header_actions.children().add(&leave_voice);
-    header_actions.children().add(&share);
     header_actions.children().add(&open_settings_room);
     header_actions.children().add(&disconnect);
     let header_grid = Grid::new();
@@ -493,8 +495,6 @@ pub(crate) fn create_main_window() -> Ref<Window> {
 
     // ---- secondary toolbar: voice and sharing controls ----
     let toolbar = ui_kit::row(10.0);
-    toolbar.children().add(&mute_mic);
-    toolbar.children().add(&mute_speaker);
     toolbar.children().add(&voice_status);
     toolbar.children().add(&share_row);
     toolbar.children().add(&control_row);
