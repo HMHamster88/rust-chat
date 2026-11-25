@@ -9,6 +9,8 @@
 #   RUST_CHAT_PASSWORD=...             RUST_CHAT_PUBLIC_IP=...
 #   RUST_CHAT_TURN=ask|yes|no          RUST_CHAT_AUTO_UPDATE=ask|yes|no
 #   RUST_CHAT_YES=1                    accept defaults (unattended)
+#   RUST_CHAT_URL_PREFIX=https://...   release download prefix (mirrors, testing)
+#   RUST_CHAT_RELEASE_JSON=/path.json  local release metadata instead of the GitHub API
 
 set -euo pipefail
 
@@ -63,26 +65,48 @@ ask() {
 log "installing dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates tar gzip >/dev/null
+apt-get install -y -qq curl ca-certificates tar gzip jq >/dev/null
 
 TMP="$(mktemp -d)"
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
-if [[ "$VERSION" == "latest" ]]; then
+META="$TMP/release.json"
+if [[ -n "${RUST_CHAT_RELEASE_JSON:-}" ]]; then
+    log "using release metadata from $RUST_CHAT_RELEASE_JSON"
+    cp "$RUST_CHAT_RELEASE_JSON" "$META"
+elif [[ "$VERSION" == "latest" ]]; then
     log "looking up the latest release"
-    TAG="$(curl -fsSL -H 'User-Agent: rust-chat-installer' \
-        "https://api.github.com/repos/$REPO/releases/latest" \
-        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    curl -fsSL -H 'User-Agent: rust-chat-installer' \
+        "https://api.github.com/repos/$REPO/releases/latest" -o "$META"
 else
     TAG="v${VERSION#v}"
+    log "looking up release $TAG"
+    curl -fsSL -H 'User-Agent: rust-chat-installer' \
+        "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$META" \
+        || die "release $TAG was not found"
 fi
+TAG_FROM_API="$(jq -r '.tag_name // empty' "$META" 2>/dev/null || true)"
+TAG="${TAG_FROM_API:-${TAG:-}}"
 [[ -n "${TAG:-}" ]] || die "could not determine a release tag"
 ARCHIVE="rust-chat-${TAG}-linux-x86_64.tar.gz"
-URL="https://github.com/$REPO/releases/download/$TAG/$ARCHIVE"
+URL_PREFIX="${RUST_CHAT_URL_PREFIX:-https://github.com/$REPO/releases/download}"
+URL="${URL_PREFIX%/}/$TAG/$ARCHIVE"
+
+# GitHub's own digest for the archive; the second check (SHA256SUMS.txt inside the tarball)
+# would otherwise be self-referential.
+EXPECTED_DIGEST="$(jq -r --arg name "$ARCHIVE" \
+    '.assets[]? | select(.name == $name) | .digest // empty' "$META" 2>/dev/null || true)"
 
 log "downloading $TAG"
 curl -fL --retry 3 --retry-delay 2 -o "$TMP/$ARCHIVE" "$URL"
+if [[ "$EXPECTED_DIGEST" == sha256:* ]]; then
+    ACTUAL_DIGEST="$(sha256sum "$TMP/$ARCHIVE" | cut -d' ' -f1)"
+    [[ "sha256:$ACTUAL_DIGEST" == "$EXPECTED_DIGEST" ]] \
+        || die "release archive checksum mismatch (expected $EXPECTED_DIGEST)"
+else
+    warn "no digest in the release API for $ARCHIVE; relying on SHA256SUMS.txt"
+fi
 tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
 ( cd "$TMP" && grep -E '  rust-chat-server$' SHA256SUMS.txt | sha256sum -c - >/dev/null ) \
     || die "release checksum verification failed"

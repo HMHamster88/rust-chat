@@ -20,6 +20,8 @@ pub struct Release {
     pub tag: String,
     pub version: String,
     pub tarball_url: String,
+    /// GitHub's own `sha256:` digest for the asset, when the API reports one.
+    pub tarball_digest: Option<String>,
     pub html_url: String,
 }
 
@@ -56,27 +58,33 @@ fn release_from_json(value: &Value) -> Result<Release> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    let tarball_url = value
+    let asset = value
         .get("assets")
         .and_then(Value::as_array)
         .and_then(|assets| {
-            assets.iter().find_map(|asset| {
-                let name = asset.get("name")?.as_str()?;
-                if name.ends_with(ASSET_SUFFIX) {
-                    asset
-                        .get("browser_download_url")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                } else {
-                    None
-                }
+            assets.iter().find(|asset| {
+                asset
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|name| name.ends_with(ASSET_SUFFIX))
             })
         })
         .with_context(|| format!("release {tag} has no {ASSET_SUFFIX} asset"))?;
+    let tarball_url = asset
+        .get("browser_download_url")
+        .and_then(Value::as_str)
+        .context("the release asset has no download URL")?
+        .to_owned();
+    let tarball_digest = asset
+        .get("digest")
+        .and_then(Value::as_str)
+        .filter(|digest| !digest.is_empty())
+        .map(str::to_owned);
     Ok(Release {
         tag,
         version,
         tarball_url,
+        tarball_digest,
         html_url,
     })
 }
@@ -125,6 +133,7 @@ pub fn install(release: &Release) -> Result<PathBuf> {
         bail!("run this update with sudo (it replaces the installed binary)");
     }
     let archive = download(&release.tarball_url)?;
+    verify_download(&archive, release.tarball_digest.as_deref())?;
     let (binary, sums) = extract(&archive)?;
     verify_binary(&binary, &sums)?;
 
@@ -158,6 +167,21 @@ pub fn install(release: &Release) -> Result<PathBuf> {
     }
     fs::rename(&staged, &exe).with_context(|| format!("cannot install {}", exe.display()))?;
     Ok(exe)
+}
+
+/// Checks the archive against GitHub's `sha256:` asset digest when the API supplied one.
+pub fn verify_download(archive: &[u8], digest: Option<&str>) -> Result<()> {
+    let Some(digest) = digest else {
+        return Ok(());
+    };
+    let expected = digest
+        .strip_prefix("sha256:")
+        .with_context(|| format!("unsupported release digest `{digest}`"))?;
+    let actual = to_hex(&sha256(archive));
+    if !actual.eq_ignore_ascii_case(expected) {
+        bail!("download checksum mismatch: expected {expected}, got {actual}");
+    }
+    Ok(())
 }
 
 /// Extracts `rust-chat-server` and `SHA256SUMS.txt` from the release tarball.
@@ -233,15 +257,17 @@ pub fn rollback() -> Result<PathBuf> {
 }
 
 /// Restarts the unit when it is active and waits for the listener.
-pub fn restart_and_wait(port: u16) -> Result<()> {
+///
+/// Returns `false` when the unit is not active (manually installed binary), in which case there is
+/// nothing to restart.
+pub fn restart_and_wait(port: u16) -> Result<bool> {
     let active = Command::new("systemctl")
         .args(["is-active", "--quiet", UNIT])
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
     if !active {
-        // A manually installed binary (or a stopped service) has nothing to restart.
-        return Ok(());
+        return Ok(false);
     }
     let status = Command::new("systemctl")
         .args(["restart", UNIT])
@@ -253,7 +279,7 @@ pub fn restart_and_wait(port: u16) -> Result<()> {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     for _ in 0..30 {
         if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok() {
-            return Ok(());
+            return Ok(true);
         }
         std::thread::sleep(Duration::from_millis(500));
     }
@@ -293,12 +319,24 @@ mod tests {
             "html_url": "https://example.test/r",
             "assets": [
                 {"name": "rust-chat-v0.2.0-windows-x64.zip", "browser_download_url": "https://example.test/w"},
-                {"name": "rust-chat-v0.2.0-linux-x86_64.tar.gz", "browser_download_url": "https://example.test/l"}
+                {"name": "rust-chat-v0.2.0-linux-x86_64.tar.gz", "browser_download_url": "https://example.test/l",
+                 "digest": "sha256:abc"}
             ]
         }))
         .unwrap();
         assert_eq!(release.version, "0.2.0");
         assert_eq!(release.tarball_url, "https://example.test/l");
+        assert_eq!(release.tarball_digest.as_deref(), Some("sha256:abc"));
+    }
+
+    #[test]
+    fn download_digest_is_optional_and_verified() {
+        let data = b"archive";
+        let digest = format!("sha256:{}", to_hex(&sha256(data)));
+        assert!(verify_download(data, Some(&digest)).is_ok());
+        assert!(verify_download(data, None).is_ok());
+        assert!(verify_download(data, Some(&format!("sha256:{}", "0".repeat(64)))).is_err());
+        assert!(verify_download(data, Some("md5:abc")).is_err());
     }
 
     #[test]

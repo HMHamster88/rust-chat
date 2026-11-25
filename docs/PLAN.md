@@ -12,10 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** v0.1.2 published (Windows client + Linux server). The Windows client is built once
-  on `main` and reused by tags, so tagged releases are ~2 minutes. M7 desktop polish next, then M8
-  release polish (installer/signing), Android last (M9). M0–M5 results and the M6 details are in
-  §11/§12. GitHub: `HMHamster88/rust-chat`.
+- **Status:** v0.1.3 published (Windows client + Linux server; Ubuntu installer/self-update).
+  M7 desktop polish next, then M8 release polish (installer/signing), Android last (M9). M0–M5
+  results and the M6 details are in §11/§12. GitHub: `HMHamster88/rust-chat`.
 
 ---
 

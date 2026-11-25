@@ -209,8 +209,7 @@ fn update_command(
     if rollback {
         let exe = rust_chat_server::update::rollback()?;
         println!("rolled back {}", exe.display());
-        rust_chat_server::update::restart_and_wait(config.port)?;
-        println!("server restarted on port {}", config.port);
+        report_restart(&config)?;
         return Ok(());
     }
 
@@ -249,8 +248,19 @@ fn update_command(
 
     let exe = rust_chat_server::update::install(&release)?;
     println!("installed {} at {}", release.version, exe.display());
-    rust_chat_server::update::restart_and_wait(config.port)?;
-    println!("server restarted and listening on port {}", config.port);
+    report_restart(&config)?;
+    Ok(())
+}
+
+fn report_restart(config: &ServerConfig) -> anyhow::Result<()> {
+    if rust_chat_server::update::restart_and_wait(config.port)? {
+        println!("server restarted and listening on port {}", config.port);
+    } else {
+        println!(
+            "the systemd unit is not active; start it with `systemctl start {}` to load the new binary",
+            rust_chat_server::update::UNIT
+        );
+    }
     Ok(())
 }
 
@@ -297,12 +307,12 @@ fn ensure_tls_material(tls: &TlsConfig, common_name: &str) -> anyhow::Result<()>
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(cert_path, certificate.pem())?;
+    std::fs::write(key_path, key_pair.serialize_pem())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600))?;
     }
-    std::fs::write(key_path, key_pair.serialize_pem())?;
     println!("wrote {} and {}", cert_path.display(), key_path.display());
     Ok(())
 }

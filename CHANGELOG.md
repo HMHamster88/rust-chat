@@ -8,9 +8,11 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 ### Added
 
 - Server self-update (`rust-chat-server update`, `--check`, `--rollback`) and an Ubuntu installer
-  (`scripts/install-server.sh`) with systemd, optional daily updates and coturn setup.
+  (`scripts/install-server.sh`) with systemd, optional daily updates and coturn setup. Downloads
+  are checked against GitHub's release asset digest and the tarball's `SHA256SUMS.txt`.
 - `init --dir <dir> --data-dir <dir>` for the `/etc/rust-chat` + `/var/lib/rust-chat` layout, and
   `--password-file` for unattended provisioning.
+- Fixed `init` writing the TLS key permissions before the key existed (Linux-only failure).
 
 ### Notes
 
