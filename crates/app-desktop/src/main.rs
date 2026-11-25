@@ -298,6 +298,44 @@ struct Ui {
 }
 
 impl Ui {
+    /// Copies the connect form into `settings` when the values are usable.
+    fn apply_connection_form(&self, settings: &mut ClientSettings) {
+        let host = self.host.text().unwrap_or_default().trim().to_owned();
+        if !host.is_empty() {
+            settings.host = host;
+        }
+        if let Ok(port) = self.port.text().unwrap_or_default().trim().parse::<u16>()
+            && port > 0
+        {
+            settings.port = port;
+        }
+        settings.tls = self.tls.is_checked().unwrap_or(settings.tls);
+        let name = self.name.text().unwrap_or_default().trim().to_owned();
+        if !name.is_empty() {
+            settings.name = name;
+        }
+        settings.remember_password = self
+            .remember
+            .is_checked()
+            .unwrap_or(settings.remember_password);
+    }
+
+    /// Writes `settings` to disk, moving the remembered password when the user asked for it.
+    fn persist(&self, settings: &ClientSettings) -> Result<(), String> {
+        let password = self.password.text().unwrap_or_default();
+        let remembered = settings.remember_password.then_some(password.as_str());
+        self.memory.save(settings, remembered)
+    }
+
+    /// Saves what is typed in the connect panel, so a host or name survives a restart even when
+    /// the user closes the window without connecting.
+    fn save_connection_form(&self) {
+        let mut settings = self.settings.borrow().clone();
+        self.apply_connection_form(&mut settings);
+        *self.settings.borrow_mut() = settings.clone();
+        let _ = self.persist(&settings);
+    }
+
     fn connect(&self) {
         let host = self.host.text().unwrap_or_default().trim().to_owned();
         let port = self
@@ -334,14 +372,7 @@ impl Ui {
         settings.name = name.clone();
         settings.remember_password = remember;
         self.settings.replace(settings.clone());
-        if let Err(error) = self.memory.save(
-            &settings,
-            if remember {
-                Some(password.as_str())
-            } else {
-                None
-            },
-        ) {
+        if let Err(error) = self.persist(&settings) {
             self.connect_status
                 .set_text(Some(&format!("Cannot save the connection: {error}")));
         }
@@ -658,9 +689,11 @@ impl Ui {
     /// Applies a change immediately: persisted to disk and pushed to the parts that hold a copy.
     fn change_settings(&self, change: impl FnOnce(&mut ClientSettings)) {
         let mut settings = self.settings.borrow().clone();
+        // The connect panel is the source of truth for the endpoint and display name.
+        self.apply_connection_form(&mut settings);
         change(&mut settings);
         *self.settings.borrow_mut() = settings.clone();
-        match self.memory.save_settings(&settings) {
+        match self.persist(&settings) {
             Ok(()) => self.settings_screen.status.set_text(Some("Saved.")),
             Err(error) => self
                 .settings_screen
@@ -1881,6 +1914,8 @@ fn create_main_window() -> Ref<Window> {
             let weak = Rc::downgrade(&ui);
             move || {
                 if let Some(ui) = weak.upgrade() {
+                    // Keep the endpoint and display name even if the user never connected.
+                    ui.save_connection_form();
                     ui.leave_voice(Some("voice: window closed"));
                 }
                 let _ = client.disconnect();
@@ -1904,6 +1939,15 @@ fn wire(ui: &Rc<Ui>) {
         move |_, _| {
             if let Some(ui) = weak.upgrade() {
                 ui.forget_key();
+            }
+        }
+    });
+    ui.remember.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                // Remembering a password must survive a restart on its own.
+                ui.save_connection_form();
             }
         }
     });

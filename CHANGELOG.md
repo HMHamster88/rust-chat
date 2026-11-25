@@ -20,6 +20,12 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
   `micDevice` and `speakerDevice`; older settings files keep working.
 - Chat rows show a local timestamp by default.
 
+### Fixed
+
+- The connect panel now saves host, port, TLS and display name when the window closes (and when
+  "Remember password" is toggled) instead of only on **Connect**, so typed settings survive a
+  restart even if the user never connected.
+
 ## [0.1.5] — 2026-11-25
 
 ### Changed
