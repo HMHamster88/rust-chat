@@ -137,26 +137,6 @@ pub(super) fn refresh(ui: &Rc<Ui>) {
         let mut member_rows: Vec<Ref<StackPanel>> = Vec::new();
         for member in &room.members {
             let is_self = member.session_id == room.self_member.session_id;
-            let initial = member
-                .name
-                .chars()
-                .next()
-                .map(|ch| ch.to_uppercase().to_string())
-                .unwrap_or_else(|| "?".to_owned());
-            let avatar = Border::new();
-            avatar.set_width(24.0);
-            avatar.set_height(24.0);
-            avatar.set_background(Some(ui_kit::brush(if is_self {
-                0xFFD9_E7F5
-            } else {
-                0xFFE8_EEF5
-            })));
-            avatar.set_corner_radius(CornerRadius::uniform(12.0));
-            let initial_text = ui_kit::body(&initial, 11.0);
-            initial_text.set_horizontal_alignment(HorizontalAlignment::Center);
-            initial_text.set_vertical_alignment(VerticalAlignment::Center);
-            avatar.set_child(&initial_text);
-
             let mut name = member.name.clone();
             if is_self {
                 name.push_str(" (you)");
@@ -175,9 +155,7 @@ pub(super) fn refresh(ui: &Rc<Ui>) {
                     .add(icons::icon(icons::Icon::ShareScreen, 13.0));
             }
             if member.voice {
-                states
-                    .children()
-                    .add(icons::icon(icons::Icon::Microphone, 13.0));
+                states.children().add(icons::icon(icons::Icon::Phone, 13.0));
             }
             if let Some(label) = stats.get(&member.session_id)
                 && !label.is_empty()
@@ -190,14 +168,11 @@ pub(super) fn refresh(ui: &Rc<Ui>) {
 
             let row_grid = Grid::new();
             row_grid.set_column_definitions(ColumnDefinitions::from_items([
-                ColumnDefinition::with_width(GridLength::AUTO),
                 ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
                 ColumnDefinition::with_width(GridLength::AUTO),
             ]));
-            Grid::set_column(&avatar, 0);
-            Grid::set_column(&name_text, 1);
-            Grid::set_column(&states, 2);
-            row_grid.children().add(&avatar);
+            Grid::set_column(&name_text, 0);
+            Grid::set_column(&states, 1);
             row_grid.children().add(&name_text);
             row_grid.children().add(&states);
             let row_panel = StackPanel::new();
