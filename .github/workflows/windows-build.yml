@@ -1,0 +1,47 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "rust-toolchain*"
+      - ".github/workflows/windows-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+
+jobs:
+  build:
+    name: Release client artifact
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Build client
+        run: cargo build --release --locked -p rust-chat-desktop
+
+      - name: Upload client
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-chat-windows-client
+          path: target/release/rust-chat.exe
+          if-no-files-found: error
+          retention-days: 90

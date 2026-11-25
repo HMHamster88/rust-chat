@@ -12,13 +12,16 @@ artifacts to a GitHub Release. The in-app updater reads
 3. `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
    `cargo test --workspace`, and `cargo build --release -p rust-chat-desktop` (the server is a
    development tool; build it separately with `-p rust-chat-server` when needed).
-4. Commit, then tag and push:
+4. Push `main` and wait for the **Windows build** workflow (it uploads the release client as an
+   artifact). The release reuses that artifact when the tag points at the same commit, and builds
+   only as a fallback.
+5. Commit, then tag and push:
    ```powershell
    git tag v0.1.0
    git push origin main
    git push origin v0.1.0
    ```
-5. The workflow produces:
+6. The workflow produces:
    - `rust-chat-vX.Y.Z-windows-x64.zip` — `rust-chat.exe`, README and `SHA256SUMS.txt`
    - `rust-chat-vX.Y.Z-linux-x86_64.tar.gz` — the server and checksums
 6. Verify the Release page has both assets and that `rust-chat` reports “up to date” (or the

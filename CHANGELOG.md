@@ -3,6 +3,15 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [0.1.2] — 2026-11-25
+
+### Changed
+
+- Windows releases reuse the release client built on `main` (uploaded as a workflow artifact) and
+  only fall back to building on the tag, so a release is seconds rather than ~16 minutes when the
+  main build is green. The Linux server still builds during release.
+- The Windows release contains only the client, README and SHA-256 sums.
+
 ## [0.1.1] — 2026-11-25
 
 ### Changed

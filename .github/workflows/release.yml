@@ -29,14 +29,39 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Build client
+      - name: Find a prebuilt client for this commit
+        id: prebuilt
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $runs = gh run list --workflow windows-build.yml --commit "${{ github.sha }}" --status success --limit 1 --json databaseId | ConvertFrom-Json
+          if ($runs.Count -gt 0) {
+            "run_id=$($runs[0].databaseId)" >> $env:GITHUB_OUTPUT
+            Write-Output "Using Windows build run $($runs[0].databaseId)"
+          } else {
+            Write-Output "No prebuilt artifact; this run will build the client."
+          }
+
+      - name: Download the prebuilt client
+        if: steps.prebuilt.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-chat-windows-client
+          path: prebuilt
+          run-id: ${{ steps.prebuilt.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the client (fallback)
+        if: steps.prebuilt.outputs.run_id == ''
         run: cargo build --release --locked -p rust-chat-desktop
 
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item target/release/rust-chat.exe dist/
+          $exe = if (Test-Path "prebuilt/rust-chat.exe") { "prebuilt/rust-chat.exe" } else { "target/release/rust-chat.exe" }
+          Copy-Item $exe dist/rust-chat.exe
           Copy-Item README.md dist/
           $files = Get-ChildItem dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
           $lines = foreach ($file in $files) {
