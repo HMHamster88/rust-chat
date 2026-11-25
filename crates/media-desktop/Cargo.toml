@@ -11,3 +11,4 @@ rust-chat-media = { path = "../media" }
 sonora = "0.3.0"
 thiserror = { workspace = true }
 tokio = { version = "1.54.1", features = ["sync", "rt", "time"] }
+windows-capture = "2.0.1"

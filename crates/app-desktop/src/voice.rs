@@ -7,16 +7,54 @@
 
 use rust_chat_client_core::{ClientHandle, IncomingSignal};
 use rust_chat_media::audio::{FRAME_SAMPLES, rms};
+use rust_chat_media::video::{VideoEncoder, bgra_to_i420, fit_bgra, i420_to_bgra};
 use rust_chat_media::voice::VoicePeer;
 use rust_chat_media_desktop::audio::{AudioEvent, AudioHandle, Playout};
+use rust_chat_media_desktop::capture::{CapturedFrame, ScreenCapture};
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(25);
 const LEVEL_INTERVAL: Duration = Duration::from_millis(150);
+const SHARE_FPS: u32 = 10;
+const SHARE_INTERVAL: Duration = Duration::from_millis(1000 / SHARE_FPS as u64);
+const SHARE_BITRATE: u32 = 1_500_000;
+const SHARE_MAX_WIDTH: u32 = 1280;
+const SHARE_MAX_HEIGHT: u32 = 720;
+
+#[derive(Clone)]
+pub struct VideoFrame {
+    pub width: u32,
+    pub height: u32,
+    pub bgra: Vec<u8>,
+    pub at: Instant,
+}
+
+/// The latest remote screen frame, taken by the UI at its own pace.
+#[derive(Clone, Default)]
+pub struct VideoSink(Arc<Mutex<Option<VideoFrame>>>);
+
+impl VideoSink {
+    pub fn publish(&self, frame: VideoFrame) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(frame);
+        }
+    }
+
+    pub fn take(&self) -> Option<VideoFrame> {
+        self.0.lock().ok().and_then(|mut slot| slot.take())
+    }
+
+    pub fn clear(&self) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = None;
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum VoiceCommand {
@@ -24,6 +62,7 @@ pub enum VoiceCommand {
     Members(Vec<String>),
     MicMuted(bool),
     SpeakerMuted(bool),
+    Share(bool),
     Stop,
 }
 
@@ -40,6 +79,7 @@ pub enum VoiceEvent {
 pub struct VoiceController {
     commands: mpsc::UnboundedSender<VoiceCommand>,
     events: mpsc::UnboundedReceiver<VoiceEvent>,
+    video: VideoSink,
 }
 
 impl VoiceController {
@@ -49,6 +89,11 @@ impl VoiceController {
 
     pub fn try_recv(&mut self) -> Option<VoiceEvent> {
         self.events.try_recv().ok()
+    }
+
+    /// Remote screen frames decoded by the peer tasks.
+    pub fn video(&self) -> VideoSink {
+        self.video.clone()
     }
 }
 
@@ -64,6 +109,17 @@ pub fn start(
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (event_tx, event_rx) = mpsc::unbounded_channel();
     let (local_tx, _) = broadcast::channel::<Vec<i16>>(16);
+    let (video_tx, _) = broadcast::channel::<Arc<Vec<u8>>>(4);
+    let (share_tx, share_rx) = mpsc::unbounded_channel();
+    let (capture_tx, capture_rx) = mpsc::unbounded_channel::<CapturedFrame>();
+    let video = VideoSink::default();
+    runtime.spawn(share_task(
+        share_rx,
+        capture_tx,
+        capture_rx,
+        video_tx.clone(),
+        event_tx.clone(),
+    ));
     let run = VoiceRun {
         client,
         self_id,
@@ -73,6 +129,9 @@ pub fn start(
         events: event_tx,
         peers: HashMap::new(),
         local: local_tx,
+        video: video_tx,
+        share: share_tx,
+        sink: video.clone(),
         mic_muted: true,
         speaker_muted: false,
         last_self_level: Instant::now() - LEVEL_INTERVAL,
@@ -81,6 +140,7 @@ pub fn start(
     VoiceController {
         commands: command_tx,
         events: event_rx,
+        video,
     }
 }
 
@@ -102,6 +162,9 @@ struct VoiceRun {
     events: mpsc::UnboundedSender<VoiceEvent>,
     peers: HashMap<String, PeerHandle>,
     local: broadcast::Sender<Vec<i16>>,
+    video: broadcast::Sender<Arc<Vec<u8>>>,
+    share: mpsc::UnboundedSender<bool>,
+    sink: VideoSink,
     mic_muted: bool,
     speaker_muted: bool,
     last_self_level: Instant,
@@ -123,6 +186,13 @@ impl VoiceRun {
                         self.speaker_muted = muted;
                         self.handle.control.set_speaker_muted(muted);
                         self.presence();
+                    }
+                    Some(VoiceCommand::Share(on)) => {
+                        let _ = self.share.send(on);
+                        self.client.set_presence(None, None, Some(on));
+                        if !on {
+                            self.sink.clear();
+                        }
                     }
                     Some(VoiceCommand::Stop) | None => break,
                 },
@@ -197,6 +267,8 @@ impl VoiceRun {
         let (signal_tx, signal_rx) = mpsc::unbounded_channel();
         let client = self.client.clone();
         let local = self.local.subscribe();
+        let video = self.video.subscribe();
+        let sink = self.sink.clone();
         let events = self.events.clone();
         let playout = self.handle.playout.clone();
         let peer_id = id.clone();
@@ -206,8 +278,10 @@ impl VoiceRun {
                 Offer::Create,
                 client.clone(),
                 local,
+                video,
                 signal_rx,
                 playout,
+                sink,
                 events.clone(),
             )
             .await
@@ -229,6 +303,8 @@ impl VoiceRun {
         let (signal_tx, signal_rx) = mpsc::unbounded_channel();
         let client = self.client.clone();
         let local = self.local.subscribe();
+        let video = self.video.subscribe();
+        let sink = self.sink.clone();
         let events = self.events.clone();
         let playout = self.handle.playout.clone();
         let peer_id = id.clone();
@@ -238,8 +314,10 @@ impl VoiceRun {
                 Offer::Answer(sdp),
                 client.clone(),
                 local,
+                video,
                 signal_rx,
                 playout,
+                sink,
                 events.clone(),
             )
             .await
@@ -297,6 +375,9 @@ impl VoiceRun {
             self.client.send_signal(&id, json!({ "kind": "bye" }));
             peer.task.abort();
         }
+        let _ = self.share.send(false);
+        self.sink.clear();
+        self.client.set_presence(None, None, Some(false));
         self.client.set_voice(false);
         let _ = self.events.send(VoiceEvent::Ended);
     }
@@ -307,13 +388,16 @@ enum Offer {
     Answer(String),
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_peer(
     id: String,
     offer: Offer,
     client: ClientHandle,
     mut local: broadcast::Receiver<Vec<i16>>,
+    mut video: broadcast::Receiver<Arc<Vec<u8>>>,
     mut signals: mpsc::UnboundedReceiver<PeerSignal>,
     playout: Playout,
+    sink: VideoSink,
     events: mpsc::UnboundedSender<VoiceEvent>,
 ) -> Result<(), String> {
     // `0.0.0.0:0` gathers one host candidate per interface, which is enough on a LAN.
@@ -358,6 +442,9 @@ async fn run_peer(
     let mut received = peer
         .take_received()
         .ok_or_else(|| "the peer had no receiver".to_owned())?;
+    let mut received_video = peer
+        .take_received_video()
+        .ok_or_else(|| "the peer had no video receiver".to_owned())?;
     let _ = events.send(VoiceEvent::Ready);
 
     let mut last_level = Instant::now() - LEVEL_INTERVAL;
@@ -367,6 +454,18 @@ async fn run_peer(
                 Ok(frame) => {
                     if let Err(error) = peer.send_pcm(&frame).await {
                         return Err(format!("send: {error}"));
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            frame = video.recv() => match frame {
+                Ok(frame) => {
+                    if let Err(error) = peer
+                        .send_video(&frame, Duration::from_millis(1000 / SHARE_FPS as u64))
+                        .await
+                    {
+                        return Err(format!("send video: {error}"));
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -389,9 +488,93 @@ async fn run_peer(
                 }
                 None => break,
             },
+            picture = received_video.recv() => match picture {
+                Some(picture) => {
+                    let bgra = i420_to_bgra(&picture.i420, picture.width, picture.height);
+                    sink.publish(VideoFrame {
+                        width: picture.width,
+                        height: picture.height,
+                        bgra,
+                        at: Instant::now(),
+                    });
+                }
+                None => break,
+            },
         }
     }
     client.send_signal(&id, json!({ "kind": "bye" }));
     peer.close().await;
     Ok(())
+}
+
+/// Owns the capture thread and the VP8 encoder away from the audio loop.
+async fn share_task(
+    mut commands: mpsc::UnboundedReceiver<bool>,
+    capture_tx: mpsc::UnboundedSender<CapturedFrame>,
+    mut capture_rx: mpsc::UnboundedReceiver<CapturedFrame>,
+    video: broadcast::Sender<Arc<Vec<u8>>>,
+    events: mpsc::UnboundedSender<VoiceEvent>,
+) {
+    let mut capture: Option<ScreenCapture> = None;
+    let mut encoder: Option<VideoEncoder> = None;
+    let mut last = Instant::now() - SHARE_INTERVAL;
+    loop {
+        tokio::select! {
+            command = commands.recv() => match command {
+                Some(true) => {
+                    if capture.is_none() {
+                        match ScreenCapture::start_monitor(1, capture_tx.clone()) {
+                            Ok(started) => capture = Some(started),
+                            Err(error) => {
+                                let _ = events.send(VoiceEvent::PeerFailed(format!(
+                                    "screen capture: {error}"
+                                )));
+                            }
+                        }
+                    }
+                }
+                Some(false) | None => {
+                    capture = None;
+                    encoder = None;
+                }
+            },
+            frame = capture_rx.recv() => {
+                let Some(frame) = frame else { break };
+                if capture.is_none() || last.elapsed() < SHARE_INTERVAL {
+                    continue;
+                }
+                let (bgra, width, height) = fit_bgra(
+                    &frame.bgra,
+                    frame.width,
+                    frame.height,
+                    SHARE_MAX_WIDTH,
+                    SHARE_MAX_HEIGHT,
+                );
+                if encoder
+                    .as_ref()
+                    .is_none_or(|encoder| encoder.dimensions() != (width, height))
+                {
+                    encoder = VideoEncoder::new(width, height, SHARE_FPS, SHARE_BITRATE).ok();
+                }
+                let Some(encoder) = encoder.as_mut() else {
+                    continue;
+                };
+                let i420 = bgra_to_i420(&bgra, width, height);
+                match encoder.encode(&i420, false) {
+                    Ok(Some(frame)) => {
+                        let _ = video.send(Arc::new(frame.data));
+                        last = Instant::now();
+                    }
+                    Ok(None) => last = Instant::now(),
+                    Err(error) => {
+                        let _ = events.send(VoiceEvent::PeerFailed(format!("VP8 encode: {error}")));
+                        last = Instant::now();
+                    }
+                }
+            }
+        }
+    }
+    if let Some(mut capture) = capture {
+        capture.stop();
+    }
 }

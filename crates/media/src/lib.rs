@@ -5,6 +5,7 @@
 //! chosen in M3; the trait is deliberately small enough to survive that decision.
 
 pub mod audio;
+pub mod video;
 pub mod voice;
 
 use std::fmt;

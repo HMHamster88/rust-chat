@@ -2,8 +2,6 @@
 
 #![cfg(windows)]
 
-use rust_chat_desktop::voice;
-
 use ferroui_base::collections::FerroList;
 use ferroui_base::layout::{HorizontalAlignment, Orientation, VerticalAlignment};
 use ferroui_base::threading::{DispatcherPriority, DispatcherTimer};
@@ -13,16 +11,19 @@ use ferroui_controls::{
     ItemsSource, ListBox, NewApplication, StackPanel, TextBlock, TextBox, Window,
 };
 use ferroui_desktop::AppBuilderDesktopExtensions;
+use ferroui_media::MediaSubscription;
+use ferroui_media_controls::TexturePresenter;
 use ferroui_themes_fluent::FluentTheme;
 use rust_chat_client_core::{
     ChatSnapshot, ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
 };
+use rust_chat_desktop::video_surface::{VideoSurface, build_presenter};
+use rust_chat_desktop::voice::{self, VoiceCommand, VoiceController, VoiceEvent};
 use rust_chat_media_desktop::audio::AudioIo;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-use voice::{VoiceCommand, VoiceController, VoiceEvent};
 
 struct Startup {
     settings: ClientSettings,
@@ -77,6 +78,7 @@ struct VoiceRuntime {
     controller: VoiceController,
     mic_muted: Cell<bool>,
     speaker_muted: Cell<bool>,
+    sharing: Cell<bool>,
     room: String,
     /// Levels keyed by session id; the empty key is the local microphone.
     levels: RefCell<HashMap<String, (f32, Instant)>>,
@@ -118,6 +120,12 @@ struct Ui {
     leave_voice: Ref<Button>,
     mute_mic: Ref<Button>,
     mute_speaker: Ref<Button>,
+    share: Ref<Button>,
+    presenter: Ref<TexturePresenter>,
+    surface: Rc<RefCell<VideoSurface>>,
+    _presenter_sub: RefCell<Option<MediaSubscription>>,
+    last_video: RefCell<Option<Instant>>,
+    video_visible: Cell<bool>,
     voice_status: Ref<TextBlock>,
     voice_note: RefCell<Option<String>>,
     voice_line: RefCell<String>,
@@ -239,6 +247,7 @@ impl Ui {
             controller,
             mic_muted: Cell::new(true),
             speaker_muted: Cell::new(false),
+            sharing: Cell::new(false),
             room: room.room.id.clone(),
             levels: RefCell::new(HashMap::new()),
             members_signature: RefCell::new(String::new()),
@@ -256,8 +265,11 @@ impl Ui {
             runtime.controller.send(VoiceCommand::Stop);
             runtime.audio.stop();
             let _ = self.client.set_voice(false);
-            let _ = self.client.set_presence(Some(false), Some(false), None);
+            let _ = self
+                .client
+                .set_presence(Some(false), Some(false), Some(false));
             *self.voice_note.borrow_mut() = Some(reason.unwrap_or("off").to_owned());
+            self.show_video(false);
         }
     }
 
@@ -305,6 +317,43 @@ impl Ui {
         } else {
             "Mute speakers".to_owned()
         })));
+    }
+
+    fn toggle_share(&self) {
+        let sharing = {
+            let voice = self.voice.borrow();
+            let Some(runtime) = voice.as_ref() else {
+                return;
+            };
+            let sharing = !runtime.sharing.get();
+            runtime.sharing.set(sharing);
+            runtime.controller.send(VoiceCommand::Share(sharing));
+            sharing
+        };
+        *self.voice_note.borrow_mut() = Some(if sharing {
+            "sharing this screen".to_owned()
+        } else {
+            "screen sharing stopped".to_owned()
+        });
+        self.share.set_content(Some(Rc::new(if sharing {
+            "Stop sharing".to_owned()
+        } else {
+            "Share screen".to_owned()
+        })));
+        if !sharing {
+            self.show_video(false);
+        }
+    }
+
+    fn show_video(&self, visible: bool) {
+        if self.video_visible.get() == visible {
+            return;
+        }
+        self.video_visible.set(visible);
+        self.presenter.set_is_visible(visible);
+        if !visible {
+            *self.last_video.borrow_mut() = None;
+        }
     }
 }
 
@@ -397,13 +446,26 @@ fn create_main_window() -> Ref<Window> {
     mute_mic.set_content(Some(Rc::new("Unmute mic".to_string())));
     let mute_speaker = Button::new();
     mute_speaker.set_content(Some(Rc::new("Mute speakers".to_string())));
+    let share = Button::new();
+    share.set_content(Some(Rc::new("Share screen".to_string())));
     let voice_status = text("voice: off", 13.0);
     let voice_row = row();
     voice_row.children().add(join_voice.clone());
     voice_row.children().add(leave_voice.clone());
     voice_row.children().add(mute_mic.clone());
     voice_row.children().add(mute_speaker.clone());
+    voice_row.children().add(share.clone());
     voice_row.children().add(voice_status.clone());
+
+    let surface = Rc::new(RefCell::new(
+        VideoSurface::new().expect("the Direct2D video surface must be available"),
+    ));
+    let (presenter, presenter_sub) = build_presenter(surface.borrow().mailbox());
+    presenter.set_width(640.0);
+    presenter.set_height(360.0);
+    presenter.set_horizontal_alignment(HorizontalAlignment::Center);
+    presenter.set_is_visible(false);
+
     let message_model = Rc::new(FerroList::new());
     let message_list = ListBox::new();
     message_list.set_items_source(Some(ItemsSource::from(message_model.clone())));
@@ -433,6 +495,7 @@ fn create_main_window() -> Ref<Window> {
     room_panel.children().add(rooms_panel.clone());
     room_panel.children().add(text("MEMBERS", 12.0));
     room_panel.children().add(members.clone());
+    room_panel.children().add(presenter.clone());
     room_panel.children().add(message_list);
     room_panel.children().add(composer_row);
     room_panel.set_is_visible(false);
@@ -479,6 +542,12 @@ fn create_main_window() -> Ref<Window> {
         leave_voice,
         mute_mic,
         mute_speaker,
+        share,
+        presenter,
+        surface,
+        _presenter_sub: RefCell::new(Some(presenter_sub)),
+        last_video: RefCell::new(None),
+        video_visible: Cell::new(false),
         voice_status,
         voice_note: RefCell::new(None),
         voice_line: RefCell::new(String::new()),
@@ -609,6 +678,14 @@ fn wire(ui: &Rc<Ui>) {
             }
         }
     });
+    ui.share.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.toggle_share();
+            }
+        }
+    });
 }
 
 fn refresh(ui: &Rc<Ui>) {
@@ -650,6 +727,11 @@ fn refresh(ui: &Rc<Ui>) {
 
     if let Some(room) = &snapshot.room {
         refresh_voice(ui, &snapshot);
+        let presenting = room
+            .members
+            .iter()
+            .any(|member| member.sharing && member.session_id != room.self_member.session_id);
+        render_video(ui, presenting);
         let title = format!(
             "# {}   ·   {} member{}",
             room.room.name,
@@ -822,6 +904,7 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.leave_voice.set_is_visible(active);
     ui.mute_mic.set_is_visible(active);
     ui.mute_speaker.set_is_visible(active);
+    ui.share.set_is_visible(active);
 
     let note = ui
         .voice_note
@@ -837,6 +920,38 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
         *ui.voice_line.borrow_mut() = line.clone();
         ui.voice_status.set_text(Some(&line));
     }
+}
+
+fn render_video(ui: &Rc<Ui>, presenting: bool) {
+    let sink = ui
+        .voice
+        .borrow()
+        .as_ref()
+        .map(|runtime| runtime.controller.video());
+    let mut fresh = false;
+    if let Some(sink) = sink
+        && let Some(frame) = sink.take()
+    {
+        let mut surface = ui.surface.borrow_mut();
+        if surface
+            .publish(frame.width, frame.height, &frame.bgra)
+            .is_ok()
+        {
+            ui.presenter.present_latest();
+            let first = ui.last_video.borrow().is_none();
+            *ui.last_video.borrow_mut() = Some(Instant::now());
+            if first {
+                *ui.voice_note.borrow_mut() =
+                    Some(format!("receiving screen {}x{}", frame.width, frame.height));
+            }
+            fresh = true;
+        }
+    }
+    let recent = ui
+        .last_video
+        .borrow()
+        .is_some_and(|at| at.elapsed() < Duration::from_millis(1500));
+    ui.show_video(presenting && (fresh || recent));
 }
 
 fn speaking(levels: &HashMap<String, (f32, Instant)>, id: &str) -> bool {

@@ -883,6 +883,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-deque"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "622f3fc73690be383c7214310406f28a90e6edeadc3cea882f9d71e495b9711a"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1239,6 +1258,8 @@ dependencies = [
  "cc",
  "ferroui-base",
  "ferroui-controls",
+ "ferroui-media",
+ "ferroui-media-controls",
  "kurbo",
 ]
 
@@ -1292,6 +1313,28 @@ dependencies = [
  "roxmltree",
  "url",
  "xamlx",
+]
+
+[[package]]
+name = "ferroui-media"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cce12a5a3f82651faae42c51c1b3dad4fa4641c52fb264f0462bfae4f642add"
+dependencies = [
+ "ferroui-base",
+ "ferroui-build-scan",
+]
+
+[[package]]
+name = "ferroui-media-controls"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5444c42d01ac6ad558de92b804b1779326927a685d166f48c1566ad9a12de4c1"
+dependencies = [
+ "ferroui-base",
+ "ferroui-build-scan",
+ "ferroui-controls",
+ "ferroui-media",
 ]
 
 [[package]]
@@ -2782,6 +2825,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "rcgen"
 version = "0.14.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3235,6 +3298,9 @@ dependencies = [
  "ferroui-base",
  "ferroui-controls",
  "ferroui-desktop",
+ "ferroui-direct2d",
+ "ferroui-media",
+ "ferroui-media-controls",
  "ferroui-themes-fluent",
  "rust-chat-client-core",
  "rust-chat-crypto",
@@ -3244,6 +3310,7 @@ dependencies = [
  "rust-chat-server",
  "serde_json",
  "tokio",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -3258,6 +3325,8 @@ dependencies = [
  "rtc",
  "thiserror 2.0.21",
  "tokio",
+ "vp8-decoder",
+ "vp8-encoder",
  "webrtc",
 ]
 
@@ -3277,6 +3346,7 @@ dependencies = [
  "sonora",
  "thiserror 2.0.21",
  "tokio",
+ "windows-capture",
 ]
 
 [[package]]
@@ -4295,6 +4365,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vp8-decoder"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7011d3a4631e53d8384affbae3a64d40434740d546ec618e31080eb433ebe3e0"
+
+[[package]]
+name = "vp8-encoder"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3a93dc20d039e03e74d62120ecd3783a47882bb930c1481498b7d4843ed0dc4"
+dependencies = [
+ "vp8-decoder",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4445,6 +4530,19 @@ dependencies = [
  "windows-core 0.62.2",
  "windows-future 0.3.2",
  "windows-numerics 0.3.1",
+]
+
+[[package]]
+name = "windows-capture"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09046acbe9b6d039cde50e8c8178d95bb0f9b33ed7feccc4465dadc5404b31b4"
+dependencies = [
+ "parking_lot",
+ "rayon",
+ "thiserror 2.0.21",
+ "windows 0.62.2",
+ "windows-future 0.3.2",
 ]
 
 [[package]]

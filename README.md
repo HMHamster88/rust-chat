@@ -14,12 +14,14 @@ coturn, unchanged.
 
 ## Status
 
-**M3 voice complete — calls work end to end.** The FerroUI/Direct2D client joins a room's voice
+**M3 complete — voice and screen sharing.** The FerroUI/Direct2D client joins a room's voice
 mesh with one WebRTC/Opus connection per member, echo cancellation/noise suppression/AGC from the
-pure-Rust Sonora port of WebRTC APM, a jitter buffer and automatic reconnection. Two real clients
-exchange audio through the server's signal relay in an integration test. **Screen sharing (VP8)**
-is next. Settings-screen polish, the update checker and device pickers remain for their
-milestones.
+pure-Rust Sonora port of WebRTC APM, a jitter buffer and automatic reconnection. Screen sharing
+captures a monitor with Windows Graphics Capture, encodes **VP8 with a pure-Rust encoder**, and
+presents the remote frame through Direct2D without a CPU readback. Two real clients exchange
+voice through the server's signal relay in an integration test, and a UI smoke test shows the
+shared desktop arriving at 1280×720. Next is M4 (mesh polish, ICE restart, TURN). Settings-screen
+polish, the update checker and device pickers remain for their milestones.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.
@@ -32,8 +34,8 @@ the feature specification, not a runtime peer.
 | `crates/crypto` | Argon2id verifier, SCRAM-SHA-256, fingerprints |
 | `crates/server` | Control plane (axum/rustls in M1) and the `rust-chat-server` CLI |
 | `crates/client-core` | State machine, reconnect, store, history, file transfer |
-| `crates/media` | Opus, jitter buffer, WebRTC voice peer, platform-independent media seam |
-| `crates/media-desktop` | cpal/WASAPI capture and playout, Sonora APM echo cancellation |
+| `crates/media` | Opus, VP8, jitter buffer, WebRTC peer, platform-independent media seam |
+| `crates/media-desktop` | cpal/WASAPI audio, Sonora APM, Windows Graphics Capture |
 | `crates/media-android` | AAudio, platform AEC, GLES/Vulkan |
 | `crates/ui` | Shared screens, widgets and theme |
 | `crates/app-desktop` | `rust-chat` binary |

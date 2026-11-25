@@ -1,6 +1,7 @@
-//! Desktop media backend: cpal/WASAPI audio, APM echo cancellation.
+//! Desktop media backend: cpal/WASAPI audio, APM echo cancellation, screen capture.
 
 pub mod audio;
+pub mod capture;
 
 pub use rust_chat_media::{AudioDevice, AudioDevices, CaptureSource, MediaEngine, PeerId};
 

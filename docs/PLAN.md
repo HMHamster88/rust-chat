@@ -12,9 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M3 voice complete (mesh Opus with APM echo cancellation, jitter buffer, voice UI).
-  Next: VP8 screen sharing, then the mesh polish of M4. M0/M1/M2 results and the M3 texture
-  pre-work are in §11/§12; the settings screen, update checker and device pickers remain.
+- **Status:** M3 complete (voice mesh + screen sharing). Next: M4 mesh polish, ICE restart and
+  TURN. M0/M1/M2 results and the M3 media details are in §11/§12; the settings screen, update
+  checker and device pickers remain.
 
 ---
 
@@ -346,5 +346,36 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 - Verified through the real desktop UI with two instances: both show `voice: live` and the two
   members as `[voice]`, and the call survives a WASAPI xrun (xruns no longer end the session).
   One client in a call measures **114.6 MB** working set and **1.9%** of one core.
+
+### M3 — screen sharing (2026-11-25)
+
+- **Codec choice.** The plan named VP8 through libvpx. On Windows that requires a system libvpx
+  (vcpkg/pkg-config, NASM and Perl), and no maintained Rust decoder binding exists. OpenH264 was
+  considered as the low-friction alternative, but H.264 is patent-encumbered while VP8 is
+  royalty-free. The implemented path is **pure-Rust VP8** (`vp8-encoder` / `vp8-decoder` 0.1.3):
+  no libvpx, no NASM, no DLLs, and it cross-compiles to Android.
+- **Capture.** Windows Graphics Capture (monitor 1) delivers BGRA at up to 10 fps (throttled in
+  the handler). The frame is box-downscaled to at most 1280×720, converted to I420 (BT.601) and
+  encoded at 1.5 Mbps; the first frame and every 5 s are keyframes.
+- **Transport.** The same peer connection carries Opus and a VP8 `sendrecv` track. One encode is
+  broadcast to every peer. The receiver strips the VP8 payload descriptor
+  (`rtc`'s `Vp8Packet`), reassembles on the RTP marker bit, decodes to I420 and converts to BGRA
+  on a worker.
+- **Presentation.** BGRA is uploaded with `UpdateSubresource` into a ring of D3D11 textures,
+  published as a `FrameLease` and imported by FerroUI's `TexturePresenter` — the zero-readback
+  path from the texture spike.
+- **UI.** A **Share screen** button in the voice bar (toggle), a presenter pane that appears while
+  someone is `[presenting]`, and a status line that reports `receiving screen 1280x720`.
+- **Benchmark (release, 1080p→720p synthetic desktop).** Encode **14.1 ms/frame** average
+  (53 ms first keyframe), decode **3.6 ms/frame**, **1.59 Mbps** actual at 10 fps; scale+I420
+  conversion 11.4 ms/frame.
+- **Footprint.** A 4K monitor sender at 720p10: **133.4 MB** working set / 184.7 MB private /
+  **13.4%** of one core average (27% peak).
+- Tests: a two-peer WebRTC test carries VP8 frames and decodes a non-flat 640×360 picture; the
+  two-peer audio test still passes on the same connection. An opt-in capture test proves WGC
+  delivers a 3840×2160 BGRA frame. The UI smoke test shows the shared desktop in the receiver's
+  presenter pane.
+- Still open for M4: TURN/relay path, ICE restart, PLI-driven keyframes, monitor/window picker,
+  resolution/fps settings, 4-peer measurement.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

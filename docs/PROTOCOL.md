@@ -144,7 +144,7 @@ screen stays usable without joining.
 | `room.create` | `{name, topic?, voice?}` | Creates a room, moves the creator into it, broadcasts `room.list.result`, answers `room.state`. |
 | `room.delete` | `{roomId}` | Removes an empty client-created room; broadcasts `room.deleted` and the new list. |
 | `chat.send` | `{text, clientMsgId}` | Relayed to the room as `chat.message`. |
-| `presence.update` | `{selfMute?, selfDeaf?, sharing?}` | Broadcast as `member.updated`. |
+| `presence.update` | `{selfMute?, selfDeaf?, sharing?, voice?}` | Broadcast as `member.updated`. |
 | `rtc.signal` | `{to, signal}` | Relayed verbatim as `rtc.signal` to `to`. |
 | `file.offer` | `{transferId, name, size, sha256}` | Relayed to the room as `file.offer`. |
 | `file.accept` | `{transferId, to}` | Relayed to the sender only. |
@@ -199,7 +199,7 @@ the sender's room, and forwards SDP/candidates byte-for-byte. A target outside t
 | `room.flags` | `{deletable: [roomId, …]}` |
 | `member.joined` | `{member}` |
 | `member.left` | `{sessionId, reason}` |
-| `member.updated` | `{sessionId, selfMute, selfDeaf, sharing}` |
+| `member.updated` | `{sessionId, selfMute, selfDeaf, sharing, voice}` |
 | `rtc.signal` | `{from, signal}` |
 | `chat.message` | `{messageId, roomId, from, name, text, ts, clientMsgId?}` |
 | `file.offer` | `{from, transferId, name, size, sha256}` |
@@ -221,6 +221,7 @@ the sender's room, and forwards SDP/candidates byte-for-byte. A target outside t
   "selfMute": false,
   "selfDeaf": false,
   "sharing": false,
+  "voice": false,
   "features": ["video"]
 }
 ```
@@ -245,6 +246,10 @@ demand. Clients treat deltas as hints and the snapshot as truth.
 - `member.left` reasons: `leave`, `disconnect`, `kicked_timeout`, `server_shutdown`.
 - Presence flags are advisory; the server does not verify that a client claiming `selfMute` is
   actually muted.
+- `voice = true` means "this session is in the room's voice mesh". The desktop client sets it
+  when the user joins a call, together with `selfMute = true` (muted on join), and clears it on
+  leave. `sharing = true` means "this session is sending a screen share"; it is independent of
+  the voice flag and is what shows the presenter.
 
 **Ordering invariant.** `welcome` and the joining session's first `room.state` are enqueued while
 the server holds the room lock, before any `member.joined`/`member.left`/`chat.message` for that
@@ -301,9 +306,11 @@ a third track) would require perfect negotiation with rollback and replace this 
 ### 6.4 ICE
 
 - Servers come from `welcome.turn`; with no TURN, only host/srflx candidates exist.
-- Trickle ICE via `rtc.signal {kind:"ice"}`. Truncated candidates are dropped silently.
-- Candidates may arrive before the remote description; the receiver buffers them.
-- Keyframes are requested with RTCP PLI when a video track opens or frames are lost.
+- Trickle ICE via `rtc.signal {kind:"ice"}` is defined, but the desktop implementation gathers
+  host candidates before sending the SDP, so offers and answers carry their candidates inline.
+  The `ice` kind remains available for networks that need it.
+- Keyframes: the sender emits one every 5 seconds (and on share start). PLI-driven keyframes are
+  an M4 refinement.
 - The UI exposes per-peer state: `new / connecting / direct / relayed / failed`. `relayed` is
   derived from the selected candidate pair, never guessed.
 - The peer that owns the offer retries a failed connection with an ICE restart, up to three
