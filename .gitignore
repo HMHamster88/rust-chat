@@ -24,6 +24,7 @@ Thumbs.db
 
 # Local runtime state (server credentials, pins, history)
 /config/
+/.rust-chat/
 *.p12
 *.pem
 *.key
