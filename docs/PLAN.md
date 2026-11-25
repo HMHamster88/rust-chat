@@ -195,7 +195,7 @@ Every row must exist or be explicitly dropped.
 | **M5** | Screen share + remote control | Share window/screen; repeated start/stop; input with lease; CPU target | 3 wk |
 | **M6** | File transfer + previews + captions | 1 GiB hash match; cancel mid-flight; relay path; no resume documented | 1.5 wk |
 | **M7** | Desktop polish: settings screen, file previews, per-peer stats, soak, accessibility | No open parity gaps except Android; 1 h soak with 4 clients; settings persist | 2–3 wk |
-| **M8** | Releases and updates: CI matrix, Windows package/installer, GitHub releases, in-app update check, docs | Tagged release builds reproducibly; update check works; install/uninstall clean | 1–2 wk |
+| **M8** | Releases and updates: CI matrix, Windows package/installer, GitHub releases, in-app update check, Ubuntu VPS install/update, docs | Tagged release builds reproducibly; update check works; install/uninstall clean; VPS one-liner install and `update` works | 1–2 wk |
 | **M9** | Android (last): UI, audio, video receive, files, foreground service, IME | Real TECNO device: voice + text + receive + watch + settings persist | 4–6 wk |
 
 Total ~18–22 weeks full-time; realistically 6–9 months part-time. M3/M5 and M9 (Android, moved to
@@ -476,6 +476,11 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   CHANGELOG/releasing docs, in-app GitHub release check with “Open release”, and startup toggle.
 - Still to do: Windows installer (MSI or Inno Setup) alongside the portable zip, Authenticode
   signing (optional), automatic download of the new build, and update notes in the UI.
+- **Ubuntu VPS (planned):** one-line installer (`scripts/install-server.sh`), a split
+  `/etc/rust-chat` + `/var/lib/rust-chat` layout, a hardened systemd unit, `rust-chat-server
+  update` with checksum verification, atomic replacement, health check and rollback, plus an
+  opt-in update timer. Phase 2 is a signed APT repository; Docker is optional. See
+  [SERVER_DEPLOY.md](SERVER_DEPLOY.md).
 
 ### M9 — Android (last)
 

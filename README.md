@@ -13,6 +13,7 @@ coturn, unchanged.
 - Kotlin baseline (RAM/CPU): [docs/BASELINE.md](docs/BASELINE.md)
 - Release history: [CHANGELOG.md](CHANGELOG.md)
 - Release process: [docs/RELEASING.md](docs/RELEASING.md)
+- Ubuntu VPS deployment plan: [docs/SERVER_DEPLOY.md](docs/SERVER_DEPLOY.md)
 
 ## Download
 
