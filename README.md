@@ -14,13 +14,11 @@ coturn, unchanged.
 
 ## Status
 
-**M5 complete — remote control and share controls.** A viewer with the presenter pane can request
-control over the peer-to-peer `control` data channel; the host sees an Allow/Deny prompt and grants
-a 5–60 minute lease (30 default). Granted input is injected through `SendInput` with mouse, wheel
-and keyboard mapping, Alt+F4 filtered, heartbeat monitoring and release-all on end. The sharer can
-pick any monitor or window and a quality preset (720p/1080p/1440p, 5/10/15 fps; 720p up to 30),
-persisted across runs. Repeated start/stop and window capture are verified. Next is **M6: file
-transfer**.
+**M6 complete — file transfer.** Files move peer-to-peer over a reliable `files` data channel:
+offer/accept/decline, caption, live progress, cancel, SHA-256 verification, `.part` rename,
+numeric suffixes, and the Downloads folder (writability checked). The sender hashes first and the
+receiver verifies before finishing; a 1 GiB transfer matched hashes in 23.8 s (release). Next is
+**M7: Android**. Previews and the remaining parity polish stay for M8.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.

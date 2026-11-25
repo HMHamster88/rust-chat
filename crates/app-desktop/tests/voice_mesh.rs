@@ -13,6 +13,7 @@ use rust_chat_media_desktop::audio::{AudioControl, AudioEvent, AudioHandle, Play
 use rust_chat_server::config::{RoomConfig, ServerConfig};
 use rust_chat_server::server;
 use rust_chat_server::state::Shared;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -242,6 +243,316 @@ fn rms_f32(samples: &[f32]) -> f32 {
         return 0.0;
     }
     (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn files_transfer_and_cancel_between_two_clients() {
+    unsafe {
+        std::env::set_var("RUST_CHAT_MEDIA_UDP", "127.0.0.1:0");
+    }
+    let downloads = std::env::temp_dir().join(format!("rust-chat-dl-{}", std::process::id()));
+    let source_dir = std::env::temp_dir().join(format!("rust-chat-src-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&source_dir);
+    std::fs::create_dir_all(&downloads).unwrap();
+    std::fs::create_dir_all(&source_dir).unwrap();
+    unsafe {
+        std::env::set_var("RUST_CHAT_DOWNLOADS_DIR", &downloads);
+    }
+
+    let (address, server_task) = start_server().await;
+    let alice = connect(address, "ana", "files-a").await;
+    let bob = connect(address, "ben", "files-b").await;
+    let alice_id = alice.snapshot().self_id.clone().unwrap();
+    let bob_id = bob.snapshot().self_id.clone().unwrap();
+
+    let alice_audio = fake_audio();
+    let bob_audio = fake_audio();
+    let mut alice_voice = voice::start(
+        alice.clone(),
+        alice_id.clone(),
+        alice_audio.handle,
+        &tokio::runtime::Handle::current(),
+        None,
+        ShareSettings::default(),
+    );
+    let mut bob_voice = voice::start(
+        bob.clone(),
+        bob_id.clone(),
+        bob_audio.handle,
+        &tokio::runtime::Handle::current(),
+        None,
+        ShareSettings::default(),
+    );
+    let _ = alice.set_voice(true);
+    let _ = bob.set_voice(true);
+    wait_for(&alice, |snapshot| {
+        snapshot
+            .room
+            .as_ref()
+            .is_some_and(|room| room.members.iter().filter(|member| member.voice).count() >= 2)
+    })
+    .await;
+    alice_voice.send(VoiceCommand::Members(vec![
+        alice_id.clone(),
+        bob_id.clone(),
+    ]));
+    bob_voice.send(VoiceCommand::Members(vec![
+        bob_id.clone(),
+        alice_id.clone(),
+    ]));
+    let mut ready = 0;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline && ready < 2 {
+        for event in std::iter::from_fn(|| alice_voice.try_recv()) {
+            if matches!(event, VoiceEvent::Ready(_)) {
+                ready += 1;
+            }
+        }
+        for event in std::iter::from_fn(|| bob_voice.try_recv()) {
+            if matches!(event, VoiceEvent::Ready(_)) {
+                ready += 1;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(ready, 2, "both peers connected");
+
+    // 2 MiB round trip.
+    let source = source_dir.join("report.bin");
+    let content: Vec<u8> = (0..2 * 1024 * 1024)
+        .map(|index| (index % 251) as u8)
+        .collect();
+    std::fs::write(&source, &content).unwrap();
+    alice_voice.send(VoiceCommand::SendFile {
+        peer: bob_id.clone(),
+        path: source.display().to_string(),
+        caption: "quarterly".into(),
+    });
+
+    let mut offered = None;
+    let mut received = None;
+    let mut sent = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while tokio::time::Instant::now() < deadline && (received.is_none() || !sent) {
+        let bob_events: Vec<_> = std::iter::from_fn(|| bob_voice.try_recv()).collect();
+        for event in bob_events {
+            match event {
+                VoiceEvent::FileOffered { id, size, .. } => {
+                    assert_eq!(size, content.len() as u64);
+                    offered = Some(id.clone());
+                    bob_voice.send(VoiceCommand::AcceptFile { id });
+                }
+                VoiceEvent::FileReceived { path, .. } => received = Some(PathBuf::from(path)),
+                VoiceEvent::FileFailed { message, .. } => panic!("receiver failed: {message}"),
+                _ => {}
+            }
+        }
+        let alice_events: Vec<_> = std::iter::from_fn(|| alice_voice.try_recv()).collect();
+        for event in alice_events {
+            match event {
+                VoiceEvent::FileSent { .. } => sent = true,
+                VoiceEvent::FileFailed { message, .. } => panic!("sender failed: {message}"),
+                _ => {}
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(offered.is_some(), "the offer arrived");
+    let path = received.expect("the file was received");
+    assert!(sent, "the sender finished");
+    assert_eq!(std::fs::read(&path).unwrap(), content);
+    assert!(!path.to_string_lossy().ends_with(".part"));
+
+    // A cancellation mid-flight leaves no final file and no `.part`.
+    let big = source_dir.join("big.bin");
+    let big_content = vec![7u8; 16 * 1024 * 1024];
+    std::fs::write(&big, &big_content).unwrap();
+    alice_voice.send(VoiceCommand::SendFile {
+        peer: bob_id.clone(),
+        path: big.display().to_string(),
+        caption: String::new(),
+    });
+    let mut cancel_id = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline && cancel_id.is_none() {
+        let events: Vec<_> = std::iter::from_fn(|| bob_voice.try_recv()).collect();
+        for event in events {
+            if let VoiceEvent::FileOffered { id, .. } = event {
+                bob_voice.send(VoiceCommand::AcceptFile { id: id.clone() });
+                cancel_id = Some(id);
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let cancel_id = cancel_id.expect("the big offer arrived");
+    bob_voice.send(VoiceCommand::CancelFile {
+        id: cancel_id.clone(),
+    });
+    let mut cancelled = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline && !cancelled {
+        for event in std::iter::from_fn(|| bob_voice.try_recv()) {
+            if matches!(
+                event,
+                VoiceEvent::FileCancelled { .. } | VoiceEvent::FileFailed { .. }
+            ) {
+                cancelled = true;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(cancelled, "the cancellation was reported");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for entry in std::fs::read_dir(&downloads).unwrap() {
+        let entry = entry.unwrap();
+        assert!(
+            !entry.file_name().to_string_lossy().contains("big"),
+            "a cancelled download left {:?}",
+            entry.path()
+        );
+    }
+
+    alice_voice.send(VoiceCommand::Stop);
+    bob_voice.send(VoiceCommand::Stop);
+    let _ = alice.disconnect();
+    let _ = bob.disconnect();
+    drop(alice);
+    drop(bob);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&source_dir);
+    unsafe {
+        std::env::remove_var("RUST_CHAT_DOWNLOADS_DIR");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "1 GiB; run explicitly for the M6 hash gate"]
+async fn one_gib_transfer_matches_sha256() {
+    unsafe {
+        std::env::set_var("RUST_CHAT_MEDIA_UDP", "127.0.0.1:0");
+    }
+    let downloads = std::env::temp_dir().join(format!("rust-chat-dl-gib-{}", std::process::id()));
+    let source_dir = std::env::temp_dir().join(format!("rust-chat-src-gib-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&source_dir);
+    std::fs::create_dir_all(&downloads).unwrap();
+    std::fs::create_dir_all(&source_dir).unwrap();
+    unsafe {
+        std::env::set_var("RUST_CHAT_DOWNLOADS_DIR", &downloads);
+    }
+
+    let (address, server_task) = start_server().await;
+    let alice = connect(address, "gib-a", "gib-a").await;
+    let bob = connect(address, "gib-b", "gib-b").await;
+    let alice_id = alice.snapshot().self_id.clone().unwrap();
+    let bob_id = bob.snapshot().self_id.clone().unwrap();
+    let alice_audio = fake_audio();
+    let bob_audio = fake_audio();
+    let mut alice_voice = voice::start(
+        alice.clone(),
+        alice_id.clone(),
+        alice_audio.handle,
+        &tokio::runtime::Handle::current(),
+        None,
+        ShareSettings::default(),
+    );
+    let mut bob_voice = voice::start(
+        bob.clone(),
+        bob_id.clone(),
+        bob_audio.handle,
+        &tokio::runtime::Handle::current(),
+        None,
+        ShareSettings::default(),
+    );
+    let _ = alice.set_voice(true);
+    let _ = bob.set_voice(true);
+    wait_for(&alice, |snapshot| {
+        snapshot
+            .room
+            .as_ref()
+            .is_some_and(|room| room.members.iter().filter(|member| member.voice).count() >= 2)
+    })
+    .await;
+    alice_voice.send(VoiceCommand::Members(vec![
+        alice_id.clone(),
+        bob_id.clone(),
+    ]));
+    bob_voice.send(VoiceCommand::Members(vec![
+        bob_id.clone(),
+        alice_id.clone(),
+    ]));
+    let start = tokio::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(15) {
+        let a: Vec<_> = std::iter::from_fn(|| alice_voice.try_recv()).collect();
+        let b: Vec<_> = std::iter::from_fn(|| bob_voice.try_recv()).collect();
+        if a.iter().any(|event| matches!(event, VoiceEvent::Ready(_)))
+            && b.iter().any(|event| matches!(event, VoiceEvent::Ready(_)))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let source = source_dir.join("one-gib.bin");
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create(&source).unwrap();
+        let block = vec![0x5au8; 1024 * 1024];
+        for _ in 0..1024 {
+            file.write_all(&block).unwrap();
+        }
+    }
+    assert_eq!(
+        std::fs::metadata(&source).unwrap().len(),
+        1024 * 1024 * 1024
+    );
+    let source_hash = rust_chat_desktop::files::sha256_file(&source).unwrap();
+    alice_voice.send(VoiceCommand::SendFile {
+        peer: bob_id.clone(),
+        path: source.display().to_string(),
+        caption: String::new(),
+    });
+
+    let mut received = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
+    while tokio::time::Instant::now() < deadline && received.is_none() {
+        let events: Vec<_> = std::iter::from_fn(|| bob_voice.try_recv()).collect();
+        for event in events {
+            match event {
+                VoiceEvent::FileOffered { id, .. } => {
+                    bob_voice.send(VoiceCommand::AcceptFile { id });
+                }
+                VoiceEvent::FileReceived { path, .. } => {
+                    received = Some(PathBuf::from(path));
+                }
+                _ => {}
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let path = received.expect("1 GiB file received");
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), 1024 * 1024 * 1024);
+    assert_eq!(
+        rust_chat_desktop::files::sha256_file(&path).unwrap(),
+        source_hash
+    );
+
+    alice_voice.send(VoiceCommand::Stop);
+    bob_voice.send(VoiceCommand::Stop);
+    let _ = alice.disconnect();
+    let _ = bob.disconnect();
+    drop(alice);
+    drop(bob);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&downloads);
+    let _ = std::fs::remove_dir_all(&source_dir);
+    unsafe {
+        std::env::remove_var("RUST_CHAT_DOWNLOADS_DIR");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -12,8 +12,8 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M5 complete (remote control, monitor/window picker, quality presets, repeated
-  start/stop). Next: M6 file transfer. M0–M4 results and the M5 details are in §11/§12.
+- **Status:** M6 complete (file transfer with hashing, progress, cancel and Downloads). Next: M7
+  Android. M0–M5 results and the M6 details are in §11/§12.
 
 ---
 
@@ -433,5 +433,29 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   successfully.
 - Remaining: 1080p/1440p at 30 fps is not offered (the pure-Rust encoder would miss the frame
   budget), and a live non-dry-run input check still needs a second machine.
+
+### M6 — file transfer (2026-11-25)
+
+- **Transport.** The offerer creates a second reliable, ordered data channel labeled `files`.
+  Metadata travels as JSON (`offer`, `accept`, `decline`, `cancel`, `finish`, `complete`,
+  `error`); payloads use a compact binary frame: type byte, transfer-id length and bytes, a
+  `u64` offset, then the chunk (60 KiB).
+- **Offer flow.** The sender opens the file, enforces the 8 GiB and 255-character caps, hashes it
+  in a blocking task, then offers name/size/SHA-256/caption to the chosen member. The recipient
+  sees the offer with Accept/Decline; one transfer per peer at a time.
+- **Receive path.** Accept picks the Downloads folder (creates it and proves writability), chooses
+  a unique name (` (1)`, ` (2)`, …), writes to `<name>.part`, and hashes while writing. `finish`
+  checks the byte count and SHA-256 before renaming to the final name; a mismatch or cancel
+  removes the `.part`.
+- **Progress, cancel and open.** The UI shows `name: 42% · 1.2/2.0 MiB`, a Cancel button (either
+  side ends the transfer cleanly) and an Open button for the last completed file. Captions are
+  displayed with the offer.
+- **Verified.** A 2 MiB round trip through the real UI (offer → Accept → saved, content match);
+  a headless 2 MiB + 16 MiB cancel test; and the M6 gate, a **1 GiB** transfer whose source and
+  destination SHA-256 match, in **23.8 s** (release, loopback, ~45 MB/s). 91 workspace tests.
+  The debug build is roughly an order of magnitude slower; large-transfer numbers should use
+  release.
+- Remaining: image previews and open-when-finished by default (the Open button exists); resume is
+  still explicitly not supported.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

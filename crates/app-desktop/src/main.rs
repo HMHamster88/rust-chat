@@ -24,12 +24,14 @@ use rust_chat_client_core::{
     ChatSnapshot, ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
 };
 use rust_chat_desktop::control::{DEFAULT_LEASE_SECS, InputEvent, RemoteButton, countdown};
+use rust_chat_desktop::files::human_size;
 use rust_chat_desktop::video_surface::{VideoSurface, build_presenter};
 use rust_chat_desktop::voice::{self, ShareSettings, VoiceCommand, VoiceController, VoiceEvent};
 use rust_chat_media_desktop::audio::AudioIo;
 use rust_chat_media_desktop::capture::{CaptureSource, SourceInfo, enumerate_sources};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -170,6 +172,27 @@ struct Ui {
     last_mouse: Cell<Instant>,
     input_tokens: RefCell<Vec<RoutedEventHandlerToken>>,
     control_line: RefCell<String>,
+    file_members: Ref<StackPanel>,
+    file_path: Ref<TextBox>,
+    file_caption: Ref<TextBox>,
+    file_send: Ref<Button>,
+    file_choose: Ref<Button>,
+    file_offer_panel: Ref<StackPanel>,
+    file_offer_text: Ref<TextBlock>,
+    file_accept: Ref<Button>,
+    file_decline: Ref<Button>,
+    file_status: Ref<TextBlock>,
+    file_cancel: Ref<Button>,
+    file_open: Ref<Button>,
+    file_panel: Ref<StackPanel>,
+    file_target: RefCell<Option<String>>,
+    file_offers: RefCell<Vec<(String, String, String, u64)>>,
+    file_names: RefCell<HashMap<String, String>>,
+    file_active: RefCell<Option<String>>,
+    file_last: RefCell<Option<PathBuf>>,
+    file_members_sig: RefCell<String>,
+    file_line: RefCell<String>,
+    file_shown: RefCell<String>,
     presenter: Ref<TexturePresenter>,
     video_host: Ref<Grid>,
     surface: Rc<RefCell<VideoSurface>>,
@@ -558,6 +581,135 @@ impl Ui {
         *self.control_request.borrow_mut() = None;
     }
 
+    fn choose_file(&self) {
+        if let Some(path) = rfd::FileDialog::new().pick_file() {
+            self.file_path.set_text(Some(&path.display().to_string()));
+        }
+    }
+
+    fn send_file(&self) {
+        let Some(target) = self.file_target.borrow().clone() else {
+            *self.file_line.borrow_mut() = "choose a member to send to".to_owned();
+            return;
+        };
+        let path = self.file_path.text().unwrap_or_default().trim().to_owned();
+        if path.is_empty() {
+            *self.file_line.borrow_mut() = "choose a file first".to_owned();
+            return;
+        }
+        let caption = self.file_caption.text().unwrap_or_default();
+        self.send_voice_command(VoiceCommand::SendFile {
+            peer: target,
+            path,
+            caption,
+        });
+    }
+
+    fn accept_offer(&self) {
+        let offer = {
+            let mut offers = self.file_offers.borrow_mut();
+            if offers.is_empty() {
+                return;
+            }
+            offers.remove(0)
+        };
+        let (id, peer, name, _) = offer;
+        self.send_voice_command(VoiceCommand::AcceptFile { id: id.clone() });
+        *self.file_active.borrow_mut() = Some(id);
+        *self.file_line.borrow_mut() = format!("receiving {name} from {}", self.member_name(&peer));
+        self.update_offer_panel();
+    }
+
+    fn decline_offer(&self) {
+        let offer = {
+            let mut offers = self.file_offers.borrow_mut();
+            if offers.is_empty() {
+                return;
+            }
+            offers.remove(0)
+        };
+        self.send_voice_command(VoiceCommand::DeclineFile { id: offer.0 });
+        *self.file_line.borrow_mut() = "declined".to_owned();
+        self.update_offer_panel();
+    }
+
+    fn cancel_file(&self) {
+        let Some(id) = self.file_active.borrow().clone() else {
+            return;
+        };
+        self.send_voice_command(VoiceCommand::CancelFile { id });
+        *self.file_active.borrow_mut() = None;
+        *self.file_line.borrow_mut() = "cancelled".to_owned();
+    }
+
+    fn open_last_file(&self) {
+        let path = self.file_last.borrow().clone();
+        if let Some(path) = path {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &path.display().to_string()])
+                .spawn();
+        }
+    }
+
+    fn update_offer_panel(&self) {
+        let offers = self.file_offers.borrow();
+        let Some((_, peer, name, size)) = offers.first() else {
+            self.file_offer_panel.set_is_visible(false);
+            return;
+        };
+        self.file_offer_text.set_text(Some(&format!(
+            "{} offers {} ({})",
+            self.member_name(peer),
+            name,
+            rust_chat_desktop::files::human_size(*size)
+        )));
+        self.file_offer_panel.set_is_visible(true);
+    }
+
+    fn refresh_file_members(self: &Rc<Self>, room: &rust_chat_protocol::RoomState) {
+        let signature = room
+            .members
+            .iter()
+            .filter(|member| member.session_id != room.self_member.session_id)
+            .map(|member| member.session_id.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        if *self.file_members_sig.borrow() == signature {
+            return;
+        }
+        *self.file_members_sig.borrow_mut() = signature.clone();
+        self.file_members.children().clear();
+        let mut first = None;
+        for member in &room.members {
+            if member.session_id == room.self_member.session_id {
+                continue;
+            }
+            if first.is_none() {
+                first = Some(member.session_id.clone());
+            }
+            let button = Button::new();
+            button.set_content(Some(Rc::new(format!("To {}", member.name))));
+            let weak = Rc::downgrade(self);
+            let id = member.session_id.clone();
+            let label = member.name.clone();
+            button.click(move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    *ui.file_target.borrow_mut() = Some(id.clone());
+                    *ui.file_line.borrow_mut() = format!("send to {label}");
+                }
+            });
+            self.file_members.children().add(button);
+        }
+        let valid = self
+            .file_target
+            .borrow()
+            .as_ref()
+            .is_some_and(|target| signature.split(',').any(|id| id == target));
+        if !valid {
+            *self.file_target.borrow_mut() = first;
+        }
+    }
+
     fn send_input(&self, event: InputEvent) {
         if !self.controlling() {
             return;
@@ -894,6 +1046,56 @@ fn create_main_window() -> Ref<Window> {
     let composer_row = row();
     composer_row.children().add(composer.clone());
     composer_row.children().add(send.clone());
+
+    let file_members = StackPanel::new();
+    file_members.set_orientation(Orientation::Horizontal);
+    file_members.set_spacing(6.0);
+    let file_path = TextBox::new();
+    file_path.set_width(420.0);
+    let file_caption = TextBox::new();
+    file_caption.set_width(160.0);
+    let file_choose = Button::new();
+    file_choose.set_content(Some(Rc::new("Choose…".to_string())));
+    let file_send = Button::new();
+    file_send.set_content(Some(Rc::new("Send file".to_string())));
+    let file_row = row();
+    file_row.children().add(file_choose.clone());
+    file_row.children().add(file_path.clone());
+    file_row.children().add(file_caption.clone());
+    file_row.children().add(file_send.clone());
+    let file_offer_text = text("", 13.0);
+    let file_accept = Button::new();
+    file_accept.set_content(Some(Rc::new("Accept".to_string())));
+    let file_decline = Button::new();
+    file_decline.set_content(Some(Rc::new("Decline".to_string())));
+    let file_offer_actions = row();
+    file_offer_actions.children().add(file_accept.clone());
+    file_offer_actions.children().add(file_decline.clone());
+    let file_offer_panel = StackPanel::new();
+    file_offer_panel.set_spacing(4.0);
+    file_offer_panel.children().add(file_offer_text.clone());
+    file_offer_panel.children().add(file_offer_actions);
+    file_offer_panel.set_is_visible(false);
+    let file_status = text("", 13.0);
+    let file_cancel = Button::new();
+    file_cancel.set_content(Some(Rc::new("Cancel".to_string())));
+    file_cancel.set_is_visible(false);
+    let file_open = Button::new();
+    file_open.set_content(Some(Rc::new("Open".to_string())));
+    file_open.set_is_visible(false);
+    let file_actions = row();
+    file_actions.children().add(file_cancel.clone());
+    file_actions.children().add(file_open.clone());
+    file_actions.children().add(file_status.clone());
+    let file_panel = StackPanel::new();
+    file_panel.set_spacing(6.0);
+    file_panel.children().add(text("FILES", 12.0));
+    file_panel.children().add(file_members.clone());
+    file_panel.children().add(file_row);
+    file_panel.children().add(file_offer_panel.clone());
+    file_panel.children().add(file_actions);
+    file_panel.set_is_visible(false);
+
     let disconnect = Button::new();
     disconnect.set_content(Some(Rc::new("Disconnect".to_string())));
     let room_actions = row();
@@ -917,6 +1119,7 @@ fn create_main_window() -> Ref<Window> {
     room_panel.children().add(video_host.clone());
     room_panel.children().add(message_list);
     room_panel.children().add(composer_row);
+    room_panel.children().add(file_panel.clone());
     room_panel.set_is_visible(false);
 
     let root = StackPanel::new();
@@ -981,6 +1184,27 @@ fn create_main_window() -> Ref<Window> {
         last_mouse: Cell::new(Instant::now()),
         input_tokens: RefCell::new(Vec::new()),
         control_line: RefCell::new(String::new()),
+        file_members,
+        file_path,
+        file_caption,
+        file_send,
+        file_choose,
+        file_offer_panel,
+        file_offer_text,
+        file_accept,
+        file_decline,
+        file_status,
+        file_cancel,
+        file_open,
+        file_panel,
+        file_target: RefCell::new(None),
+        file_offers: RefCell::new(Vec::new()),
+        file_names: RefCell::new(HashMap::new()),
+        file_active: RefCell::new(None),
+        file_last: RefCell::new(None),
+        file_members_sig: RefCell::new(String::new()),
+        file_line: RefCell::new(String::new()),
+        file_shown: RefCell::new(String::new()),
         presenter,
         video_host,
         surface,
@@ -1021,7 +1245,7 @@ fn create_main_window() -> Ref<Window> {
     let window = Window::new();
     window.set_title(Some("rust-chat".to_string()));
     window.set_width(1100.0);
-    window.set_height(800.0);
+    window.set_height(920.0);
     window.set_padding(Thickness::uniform(18.0));
     window.set_content(Some(Control::boxed(root)));
     window
@@ -1174,6 +1398,54 @@ fn wire(ui: &Rc<Ui>) {
         move |_, _| {
             if let Some(ui) = weak.upgrade() {
                 ui.respond_control(false);
+            }
+        }
+    });
+    ui.file_choose.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.choose_file();
+            }
+        }
+    });
+    ui.file_send.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.send_file();
+            }
+        }
+    });
+    ui.file_accept.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.accept_offer();
+            }
+        }
+    });
+    ui.file_decline.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.decline_offer();
+            }
+        }
+    });
+    ui.file_cancel.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cancel_file();
+            }
+        }
+    });
+    ui.file_open.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_last_file();
             }
         }
     });
@@ -1475,6 +1747,106 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
                         ui.clear_control();
                         *ui.voice_note.borrow_mut() = Some(format!("control ended: {reason}"));
                     }
+                    Some(VoiceEvent::FilePreparing { id, name }) => {
+                        ui.file_names.borrow_mut().insert(id.clone(), name.clone());
+                        *ui.file_active.borrow_mut() = Some(id);
+                        *ui.file_line.borrow_mut() = format!("hashing {name}\u{2026}");
+                    }
+                    Some(VoiceEvent::FileOutgoing {
+                        id,
+                        peer,
+                        name,
+                        size,
+                    }) => {
+                        ui.file_names.borrow_mut().insert(id.clone(), name.clone());
+                        *ui.file_active.borrow_mut() = Some(id);
+                        *ui.file_line.borrow_mut() = format!(
+                            "offering {name} ({}) to {}",
+                            human_size(size),
+                            ui.member_name(&peer)
+                        );
+                    }
+                    Some(VoiceEvent::FileOffered {
+                        id,
+                        peer,
+                        name,
+                        size,
+                        sha256: _,
+                        caption,
+                    }) => {
+                        ui.file_names.borrow_mut().insert(id.clone(), name.clone());
+                        ui.file_offers
+                            .borrow_mut()
+                            .push((id, peer.clone(), name.clone(), size));
+                        let suffix = if caption.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" \u{2014} {caption}")
+                        };
+                        *ui.file_line.borrow_mut() = format!(
+                            "{} offers {name} ({}){suffix}",
+                            ui.member_name(&peer),
+                            human_size(size)
+                        );
+                        ui.update_offer_panel();
+                    }
+                    Some(VoiceEvent::FileProgress {
+                        id,
+                        transferred,
+                        total,
+                    }) => {
+                        *ui.file_active.borrow_mut() = Some(id.clone());
+                        let name = ui
+                            .file_names
+                            .borrow()
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_else(|| "file".to_owned());
+                        let percent = transferred
+                            .saturating_mul(100)
+                            .checked_div(total)
+                            .unwrap_or(0);
+                        *ui.file_line.borrow_mut() = format!(
+                            "{name}: {percent}% \u{00b7} {}/{}",
+                            human_size(transferred),
+                            human_size(total)
+                        );
+                    }
+                    Some(VoiceEvent::FileSent { id, path: _ }) => {
+                        let name = ui
+                            .file_names
+                            .borrow()
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_else(|| "file".to_owned());
+                        *ui.file_line.borrow_mut() = format!("sent {name}");
+                        *ui.file_active.borrow_mut() = None;
+                    }
+                    Some(VoiceEvent::FileReceived { id, path }) => {
+                        let name = ui
+                            .file_names
+                            .borrow()
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_else(|| "file".to_owned());
+                        *ui.file_line.borrow_mut() = format!("saved {name} to {path}");
+                        *ui.file_active.borrow_mut() = None;
+                        *ui.file_last.borrow_mut() = Some(PathBuf::from(path));
+                    }
+                    Some(VoiceEvent::FileFailed { id, message }) => {
+                        *ui.file_line.borrow_mut() = format!("file: {message}");
+                        *ui.file_active.borrow_mut() = None;
+                        if !id.is_empty() {
+                            ui.file_offers.borrow_mut().retain(|offer| offer.0 != id);
+                            ui.update_offer_panel();
+                        }
+                    }
+                    Some(VoiceEvent::FileCancelled { id }) => {
+                        *ui.file_line.borrow_mut() = "transfer cancelled".to_owned();
+                        *ui.file_active.borrow_mut() = None;
+                        ui.file_offers.borrow_mut().retain(|offer| offer.0 != id);
+                        ui.update_offer_panel();
+                    }
                     Some(VoiceEvent::PeerFailed(error)) => peer_error = Some(error),
                     Some(VoiceEvent::Error(error)) => {
                         ended = Some(format!("audio failed: {error}"));
@@ -1527,6 +1899,18 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.share.set_is_visible(active);
     ui.share_source.set_is_visible(active);
     ui.share_quality.set_is_visible(active);
+    ui.file_panel.set_is_visible(active);
+    if active {
+        ui.refresh_file_members(room);
+    }
+    ui.file_cancel
+        .set_is_visible(ui.file_active.borrow().is_some());
+    ui.file_open.set_is_visible(ui.file_last.borrow().is_some());
+    let file_text = ui.file_line.borrow().clone();
+    if *ui.file_shown.borrow() != file_text {
+        *ui.file_shown.borrow_mut() = file_text.clone();
+        ui.file_status.set_text(Some(&file_text));
+    }
 
     let presenting = room
         .members

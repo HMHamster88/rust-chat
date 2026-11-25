@@ -93,6 +93,14 @@ async fn pump_control(channel: Arc<dyn DataChannel>, messages: mpsc::UnboundedSe
     }
 }
 
+async fn pump_files(channel: Arc<dyn DataChannel>, frames: mpsc::UnboundedSender<Vec<u8>>) {
+    while let Some(event) = channel.poll().await {
+        if let DataChannelEvent::OnMessage(message) = event {
+            let _ = frames.send(message.data.to_vec());
+        }
+    }
+}
+
 fn is_relay(entry: Option<&RTCStatsReportEntry>) -> bool {
     matches!(
         entry,
@@ -130,6 +138,8 @@ struct Handler {
     video_lost: mpsc::UnboundedSender<()>,
     control_in: mpsc::UnboundedSender<String>,
     control: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
+    files_in: mpsc::UnboundedSender<Vec<u8>>,
+    files: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -161,14 +171,23 @@ impl PeerConnectionEventHandler for Handler {
         let Ok(label) = channel.label().await else {
             return;
         };
-        if label != "control" {
-            return;
+        match label.as_str() {
+            "control" => {
+                if let Ok(mut slot) = self.control.lock() {
+                    *slot = Some(channel.clone());
+                }
+                let messages = self.control_in.clone();
+                self.runtime.spawn(pump_control(channel, messages));
+            }
+            "files" => {
+                if let Ok(mut slot) = self.files.lock() {
+                    *slot = Some(channel.clone());
+                }
+                let frames = self.files_in.clone();
+                self.runtime.spawn(pump_files(channel, frames));
+            }
+            _ => {}
         }
-        if let Ok(mut slot) = self.control.lock() {
-            *slot = Some(channel.clone());
-        }
-        let messages = self.control_in.clone();
-        self.runtime.spawn(pump_control(channel, messages));
     }
 
     async fn on_track(&self, track: Arc<dyn TrackRemote>) {
@@ -235,6 +254,9 @@ pub struct VoicePeer {
     control: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
     control_in: Option<mpsc::UnboundedReceiver<String>>,
     control_in_tx: mpsc::UnboundedSender<String>,
+    files: Arc<std::sync::Mutex<Option<Arc<dyn DataChannel>>>>,
+    files_in: Option<mpsc::UnboundedReceiver<Vec<u8>>>,
+    files_in_tx: mpsc::UnboundedSender<Vec<u8>>,
     configured_ssrc: u32,
     ssrc: u32,
     payload_type: u8,
@@ -257,6 +279,8 @@ impl VoicePeer {
         let (lost_tx, lost_rx) = mpsc::unbounded_channel();
         let (control_in_tx, control_in_rx) = mpsc::unbounded_channel();
         let control_channel = Arc::new(std::sync::Mutex::new(None));
+        let (files_in_tx, files_in_rx) = mpsc::unbounded_channel();
+        let files_channel = Arc::new(std::sync::Mutex::new(None));
         let connected = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(false));
         let (pcm_tx, pcm_rx) = mpsc::unbounded_channel();
@@ -284,6 +308,8 @@ impl VoicePeer {
             video_lost: lost_tx,
             control_in: control_in_tx.clone(),
             control: control_channel.clone(),
+            files_in: files_in_tx.clone(),
+            files: files_channel.clone(),
             runtime: tokio::runtime::Handle::current(),
         });
         let configuration = RTCConfigurationBuilder::new()
@@ -362,6 +388,9 @@ impl VoicePeer {
             control: control_channel,
             control_in: Some(control_in_rx),
             control_in_tx,
+            files: files_channel,
+            files_in: Some(files_in_rx),
+            files_in_tx,
             configured_ssrc,
             ssrc: configured_ssrc,
             payload_type: OPUS_PAYLOAD_TYPE,
@@ -435,6 +464,41 @@ impl VoicePeer {
 
     pub fn take_control(&mut self) -> Option<mpsc::UnboundedReceiver<String>> {
         self.control_in.take()
+    }
+
+    /// Offerer side: creates the reliable `files` channel before the offer.
+    pub async fn create_files(&mut self) -> Result<(), VoiceError> {
+        if self
+            .files
+            .lock()
+            .map(|slot| slot.is_some())
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        let channel = self.connection.create_data_channel("files", None).await?;
+        if let Ok(mut slot) = self.files.lock() {
+            *slot = Some(channel.clone());
+        }
+        let frames = self.files_in_tx.clone();
+        tokio::spawn(pump_files(channel, frames));
+        Ok(())
+    }
+
+    pub fn take_files(&mut self) -> Option<mpsc::UnboundedReceiver<Vec<u8>>> {
+        self.files_in.take()
+    }
+
+    /// Sends one binary file frame; false when the channel is not open yet.
+    pub async fn send_file_frame(&self, data: Vec<u8>) -> bool {
+        let channel = self.files.lock().ok().and_then(|slot| slot.clone());
+        match channel {
+            Some(channel) => channel
+                .send(bytes::BytesMut::from(data.as_slice()))
+                .await
+                .is_ok(),
+            None => false,
+        }
     }
 
     pub async fn send_control(&self, text: &str) -> bool {

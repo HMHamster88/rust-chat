@@ -267,8 +267,8 @@ The server is unaware of this section; it only relays `rtc.signal`.
 
 - One peer connection per remote member, created when the member appears in `room.state`.
 - Tracks: one audio (mic) and one video (screen share) transceiver, negotiated up front.
-- Data channels: the offerer creates the reliable, ordered `control` channel before its offer.
-  The `files` channel is added in M6 with the same pattern.
+- Data channels: the offerer creates the reliable, ordered `control` channel and then the `files`
+  channel before its offer.
 - On `member.left`, close and remove the local peer connection immediately.
 - Starting or stopping a share starts/stops the capture source. It never changes the SDP.
 
@@ -342,6 +342,32 @@ window), `{kind:"mouse_button", button, pressed}`, `{kind:"wheel", delta, horizo
   revokes after 15 s without a heartbeat.
 - Alt+F4 is filtered on the host; all held keys/buttons are released when control ends by any
   path. Control never affects the host outside an active lease.
+
+### 6.6 File transfer
+
+The `files` data channel carries one transfer per peer at a time. Control frames are JSON with a
+`t` tag:
+
+| `t` | Body | Meaning |
+|---|---|---|
+| `offer` | `{id, name, size, sha256, caption?}` | Ask the peer to receive a file. |
+| `accept` | `{id}` | The receiver is ready; the sender may stream. |
+| `decline` | `{id, reason?}` | Refuse. |
+| `cancel` | `{id, reason?}` | Either side aborts. |
+| `finish` | `{id}` | All chunks have been sent. |
+| `complete` | `{id}` | Receiver verified and renamed the file. |
+| `error` | `{id, message}` | Verification or I/O failure. |
+
+A chunk frame is binary:
+
+```
+[1][id_len: u8][id bytes][offset: u64 LE][payload]
+```
+
+Chunks are 60 KiB, sent in order; the receiver requires `offset == bytes received`, hashes as it
+writes, and only renames `<name>.part` after checking the advertised size and SHA-256. Offers are
+limited to 8 GiB and 255-character file names; names are stripped of paths and invalid characters,
+and collisions get a numeric suffix.
 
 ---
 

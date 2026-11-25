@@ -21,12 +21,16 @@ ferroui-themes-fluent = "=0.5.0"
 ferroui-media = "=0.5.0"
 ferroui-media-controls = "=0.5.0"
 ferroui-direct2d = { version = "=0.5.0", features = ["media-controls"] }
+directories = "6.0.0"
+rand = "0.10.4"
+rfd = "0.18.0"
 rust-chat-client-core = { path = "../client-core" }
 rust-chat-media = { path = "../media" }
 rust-chat-media-desktop = { path = "../media-desktop" }
 rust-chat-protocol = { path = "../protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tokio = { version = "1.54.1", features = ["full"] }
 windows = { version = "0.61.3", features = [
     "Win32_Graphics_Direct3D",
