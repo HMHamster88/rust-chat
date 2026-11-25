@@ -7,6 +7,8 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 ### Changed
 
+- Joining a voice call starts with the microphone live instead of muted (the button and the
+  presence other members see follow the same state).
 - The room has no right-hand rail any more: voice mute controls and the sharing
   source/quality/remote-control row sit in a toolbar under the header, the files panel sits above
   the composer, and the update check moved into Settings → About.

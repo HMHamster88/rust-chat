@@ -384,7 +384,7 @@ impl Ui {
         *self.voice.borrow_mut() = Some(VoiceRuntime {
             audio,
             controller,
-            mic_muted: Cell::new(true),
+            mic_muted: Cell::new(false),
             speaker_muted: Cell::new(false),
             sharing: Cell::new(false),
             room: room.room.id.clone(),
@@ -392,10 +392,10 @@ impl Ui {
             stats: RefCell::new(HashMap::new()),
             members_signature: RefCell::new(String::new()),
         });
-        // Muted on join, like a push-to-talk call.
+        // Live on join; the microphone starts unmuted.
         let _ = self.client.set_voice(true);
-        let _ = self.client.set_presence(Some(true), Some(false), None);
-        *self.voice_note.borrow_mut() = Some("joining (microphone muted)".to_owned());
+        let _ = self.client.set_presence(Some(false), Some(false), None);
+        *self.voice_note.borrow_mut() = Some("joining (microphone live)".to_owned());
         self.voice_wanted.set(true);
         self.clear_control();
         *self.voice_room_id.borrow_mut() = Some(room.room.id.clone());

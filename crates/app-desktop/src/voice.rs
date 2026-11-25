@@ -300,7 +300,7 @@ pub fn start(
         share: share_tx,
         share_settings: share,
         sink: video.clone(),
-        mic_muted: true,
+        mic_muted: false,
         speaker_muted: false,
         last_self_level: Instant::now() - LEVEL_INTERVAL,
     };
