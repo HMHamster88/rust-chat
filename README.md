@@ -14,6 +14,15 @@ coturn, unchanged.
 - Release history: [CHANGELOG.md](CHANGELOG.md)
 - Release process: [docs/RELEASING.md](docs/RELEASING.md)
 
+## Download
+
+- **Windows (portable):** [rust-chat-v0.1.0-windows-x64.zip](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-windows-x64.zip)
+  — `rust-chat.exe`, `rust-chat-server.exe`, README and SHA-256 sums.
+- **Linux server:** [rust-chat-v0.1.0-linux-x86_64.tar.gz](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-linux-x86_64.tar.gz)
+
+Binaries are unsigned, so Windows SmartScreen may warn. The app checks this same release feed from
+its update row and can open the release page.
+
 ## Status
 
 **M6 complete — file transfer.** Text, voice, screen sharing, remote control and files all work on
