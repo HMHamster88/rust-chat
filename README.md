@@ -16,13 +16,14 @@ coturn, unchanged.
 
 ## Download
 
-- **Windows (portable):** [rust-chat-v0.1.0-windows-x64.zip](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-windows-x64.zip)
+- **Windows (portable):** [rust-chat-v0.1.2-windows-x64.zip](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.2/rust-chat-v0.1.2-windows-x64.zip)
   — `rust-chat.exe`, README and SHA-256 sums.
-- **Linux server:** [rust-chat-v0.1.0-linux-x86_64.tar.gz](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-linux-x86_64.tar.gz)
+- **Linux server:** [rust-chat-v0.1.2-linux-x86_64.tar.gz](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.2/rust-chat-v0.1.2-linux-x86_64.tar.gz)
 
-The Windows server is a development tool and is not part of the Windows release. Binaries are
-unsigned, so Windows SmartScreen may warn. The app checks this same release feed from its update
-row and can open the release page.
+The Windows server is a development tool and is not part of the Windows release. Windows artifacts
+are built once on `main` and reused by tagged releases, so a release takes about two minutes when
+the main build is green. Binaries are unsigned, so Windows SmartScreen may warn. The app checks
+this same release feed from its update row and can open the release page.
 
 ## Status
 
