@@ -207,7 +207,7 @@ struct Ui {
     memory: ConnectionMemory,
     runtime: tokio::runtime::Handle,
     settings: RefCell<ClientSettings>,
-    connect_panel: Ref<StackPanel>,
+    connect_view: Ref<Grid>,
     room_view: Ref<Grid>,
     stage_frame: Ref<Border>,
     file_card: Ref<Border>,
@@ -1813,32 +1813,146 @@ fn create_main_window() -> Ref<Window> {
     trust_panel.children().add(trust_actions);
     trust_panel.set_is_visible(false);
 
-    let connect_panel = StackPanel::new();
-    connect_panel.set_spacing(10.0);
-    connect_panel.children().add(text("rust-chat", 26.0));
-    connect_panel
+    // --- connect: brand panel + centred card ---
+    host.set_width(250.0);
+    port.set_width(80.0);
+    name.set_width(340.0);
+    password_box.set_width(340.0);
+    tls.set_content(Some(Rc::new(String::new())));
+    remember.set_content(Some(Rc::new(String::new())));
+    let connect_label = ui_kit::body("Connect", 13.5);
+    connect_label.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
+    connect_button.set_content(Some(Rc::new(connect_label) as ferroui_base::BoxedValue));
+    connect_button.set_background(Some(ui_kit::brush(ui_kit::ACCENT)));
+    connect_button.set_horizontal_alignment(HorizontalAlignment::Stretch);
+
+    let brand_mark = Border::new();
+    brand_mark.set_width(46.0);
+    brand_mark.set_height(46.0);
+    brand_mark.set_background(Some(ui_kit::brush(0x33FF_FFFF)));
+    brand_mark.set_corner_radius(CornerRadius::uniform(12.0));
+    let brand_glyph = icons::icon(icons::Icon::Chat, 22.0);
+    brand_glyph.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
+    brand_mark.set_child(&brand_glyph);
+
+    let brand_title = text("rust-chat", 28.0);
+    brand_title.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
+    let brand_tag = ui_kit::muted(
+        "Self-hosted chat with voice, screen sharing and peer-to-peer files. Your server, your data.",
+        13.0,
+    );
+    brand_tag.set_foreground(Some(ui_kit::brush(0xFFD6_E6F7)));
+    brand_tag.set_text_wrapping(ferroui_base::media::TextWrapping::Wrap);
+    brand_tag.set_max_width(320.0);
+
+    let brand = StackPanel::new();
+    brand.set_spacing(10.0);
+    brand.children().add(&brand_mark);
+    brand.children().add(&brand_title);
+    brand.children().add(&brand_tag);
+    brand.children().add(ui_kit::muted("", 6.0));
+    for (glyph, label) in [
+        (icons::Icon::Chat, "Text, presence and local history"),
+        (
+            icons::Icon::Microphone,
+            "Opus voice mesh with echo cancellation",
+        ),
+        (
+            icons::Icon::ShareScreen,
+            "Screen share, remote control, direct files",
+        ),
+        (
+            icons::Icon::Shield,
+            "TOFU pinning: approve the server key once",
+        ),
+    ] {
+        let row = ui_kit::row(9.0);
+        let icon = icons::icon(glyph, 15.0);
+        icon.set_foreground(Some(ui_kit::brush(0xFFD6_E6F7)));
+        row.children().add(&icon);
+        let label = ui_kit::muted(label, 12.5);
+        label.set_foreground(Some(ui_kit::brush(0xFFE6_F0FA)));
+        row.children().add(&label);
+        brand.children().add(&row);
+    }
+    let brand_frame = Border::new();
+    brand_frame.set_background(Some(ui_kit::brush(0xFF0B_2F4D)));
+    brand_frame.set_padding(Thickness::uniform(34.0));
+    brand_frame.set_child(&brand);
+
+    let card_title = ui_kit::headline("Connect to a server");
+    let card_sub = ui_kit::muted(
+        "Settings stay in %USERPROFILE%\\.rust-chat on this machine.",
+        12.0,
+    );
+    let host_row = ui_kit::row(10.0);
+    let host_field = StackPanel::new();
+    host_field.set_spacing(4.0);
+    host_field.children().add(ui_kit::muted("Server", 11.5));
+    host_field.children().add(&host);
+    let port_field = StackPanel::new();
+    port_field.set_spacing(4.0);
+    port_field.children().add(ui_kit::muted("Port", 11.5));
+    port_field.children().add(&port);
+    host_row.children().add(&host_field);
+    host_row.children().add(&port_field);
+    let name_field = StackPanel::new();
+    name_field.set_spacing(4.0);
+    name_field
         .children()
-        .add(text("Connect to a self-hosted server", 14.0));
-    connect_panel.children().add(row_with("Host", host.clone()));
-    connect_panel.children().add(row_with("Port", port.clone()));
-    connect_panel
+        .add(ui_kit::muted("Display name", 11.5));
+    name_field.children().add(&name);
+    let password_field = StackPanel::new();
+    password_field.set_spacing(4.0);
+    password_field
         .children()
-        .add(row_with("Display name", name.clone()));
-    connect_panel
+        .add(ui_kit::muted("Password", 11.5));
+    password_field.children().add(&password_box);
+    let tls_row = ui_kit::row(8.0);
+    tls_row.children().add(&tls);
+    tls_row.children().add(ui_kit::body("Use TLS", 12.5));
+    let remember_row = ui_kit::row(8.0);
+    remember_row.children().add(&remember);
+    remember_row
         .children()
-        .add(row_with("Password", password_box.clone()));
-    let options = row();
-    options.children().add(tls.clone());
-    options.children().add(remember.clone());
-    connect_panel.children().add(options);
-    let actions = row();
-    actions.children().add(connect_button.clone());
-    actions.children().add(forget.clone());
-    actions.children().add(settings_screen.open_connect.clone());
-    connect_panel.children().add(actions);
-    connect_panel.children().add(connect_status.clone());
-    connect_panel.children().add(error_text.clone());
-    connect_panel.children().add(trust_panel.clone());
+        .add(ui_kit::body("Remember password", 12.5));
+    let options = ui_kit::row(18.0);
+    options.children().add(&tls_row);
+    options.children().add(&remember_row);
+    let actions = ui_kit::row(6.0);
+    actions.children().add(&connect_button);
+    actions.children().add(&settings_screen.open_connect);
+    actions.children().add(&forget);
+
+    let card = StackPanel::new();
+    card.set_spacing(12.0);
+    card.children().add(&card_title);
+    card.children().add(&card_sub);
+    card.children().add(&host_row);
+    card.children().add(&name_field);
+    card.children().add(&password_field);
+    card.children().add(&options);
+    card.children().add(&actions);
+    card.children().add(&connect_status);
+    card.children().add(&error_text);
+    card.children().add(&trust_panel);
+    let card_frame = ui_kit::card(&card, 26.0);
+    card_frame.set_width(430.0);
+    card_frame.set_horizontal_alignment(HorizontalAlignment::Center);
+    card_frame.set_vertical_alignment(VerticalAlignment::Center);
+
+    let connect_view = Grid::new();
+    connect_view.set_column_definitions(ColumnDefinitions::from_items([
+        ColumnDefinition::with_width(GridLength::new(400.0, GridUnitType::Pixel)),
+        ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+    ]));
+    let card_cell = Grid::new();
+    card_cell.set_background(Some(ui_kit::brush(ui_kit::BG)));
+    card_cell.children().add(&card_frame);
+    Grid::set_column(&brand_frame, 0);
+    Grid::set_column(&card_cell, 1);
+    connect_view.children().add(&brand_frame);
+    connect_view.children().add(&card_cell);
 
     let room_title = text("", 20.0);
     let room_status = text("", 13.0);
@@ -2194,7 +2308,7 @@ fn create_main_window() -> Ref<Window> {
     root.set_horizontal_alignment(HorizontalAlignment::Stretch);
     root.set_vertical_alignment(VerticalAlignment::Stretch);
     root.set_background(Some(ui_kit::brush(ui_kit::BG)));
-    root.children().add(connect_panel.clone());
+    root.children().add(connect_view.clone());
     root.children().add(room_view.clone());
     root.children().add(settings_screen.view.clone());
 
@@ -2208,7 +2322,7 @@ fn create_main_window() -> Ref<Window> {
         memory: startup.memory,
         runtime: startup.runtime,
         settings: RefCell::new(settings.clone()),
-        connect_panel,
+        connect_view: connect_view.clone(),
         room_view: room_view.clone(),
         stage_frame: stage_frame.clone(),
         file_card: file_card.clone(),
@@ -2841,7 +2955,7 @@ fn refresh(ui: &Rc<Ui>) {
     let room_visible = snapshot.room.is_some();
     let settings_open = ui.settings_screen.visible.get();
     ui.room_view.set_is_visible(room_visible && !settings_open);
-    ui.connect_panel
+    ui.connect_view
         .set_is_visible(!room_visible && !settings_open);
     ui.settings_screen.view.set_is_visible(settings_open);
 
@@ -3550,13 +3664,6 @@ fn row() -> Ref<StackPanel> {
     panel.set_orientation(Orientation::Horizontal);
     panel.set_spacing(8.0);
     panel.set_vertical_alignment(VerticalAlignment::Center);
-    panel
-}
-
-fn row_with(label: &str, field: Ref<TextBox>) -> Ref<StackPanel> {
-    let panel = row();
-    panel.children().add(text(label, 13.0));
-    panel.children().add(field);
     panel
 }
 
