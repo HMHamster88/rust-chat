@@ -234,14 +234,6 @@ pub(super) fn wire(ui: &Rc<Ui>) {
             }
         });
     }
-    ui.settings_nav.click({
-        let weak = Rc::downgrade(ui);
-        move |_, _| {
-            if let Some(ui) = weak.upgrade() {
-                ui.set_settings_visible(true);
-            }
-        }
-    });
     for (index, button) in screen.nav.iter().enumerate() {
         button.click({
             let weak = Rc::downgrade(ui);
@@ -252,15 +244,6 @@ pub(super) fn wire(ui: &Rc<Ui>) {
             }
         });
     }
-    ui.disconnect_nav.click({
-        let weak = Rc::downgrade(ui);
-        move |_, _| {
-            if let Some(ui) = weak.upgrade() {
-                ui.leave_voice(Some("voice: disconnected"));
-                let _ = ui.client.disconnect();
-            }
-        }
-    });
     screen.close.click({
         let weak = Rc::downgrade(ui);
         move |_, _| {

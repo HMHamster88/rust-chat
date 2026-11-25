@@ -130,8 +130,6 @@ struct Ui {
     pub(crate) tip_bubble: Ref<Border>,
     pub(crate) tip_label: Ref<TextBlock>,
     pub(crate) server_line: Ref<TextBlock>,
-    pub(crate) settings_nav: Ref<Button>,
-    pub(crate) disconnect_nav: Ref<Button>,
     pub(crate) host: Ref<TextBox>,
     pub(crate) port: Ref<TextBox>,
     pub(crate) name: Ref<TextBox>,

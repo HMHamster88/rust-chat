@@ -387,13 +387,6 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     brand_row.children().add(&room_mark);
     brand_row.children().add(&brand_text);
 
-    let settings_nav = icons::icon_label(icons::Icon::Settings, "Settings");
-    let settings_nav_button = Button::new();
-    settings_nav_button.set_content(Some(Rc::new(settings_nav) as ferroui_base::BoxedValue));
-    let disconnect_nav = icons::icon_label(icons::Icon::Disconnect, "Disconnect");
-    let disconnect_nav_button = Button::new();
-    disconnect_nav_button.set_content(Some(Rc::new(disconnect_nav) as ferroui_base::BoxedValue));
-
     let sidebar = StackPanel::new();
     sidebar.set_spacing(6.0);
     sidebar.children().add(&brand_row);
@@ -403,9 +396,7 @@ pub(crate) fn create_main_window() -> Ref<Window> {
         .children()
         .add(ui_kit::section_label("IN THIS ROOM"));
     sidebar.children().add(&members_panel);
-    sidebar.children().add(ui_kit::divider());
-    sidebar.children().add(&settings_nav_button);
-    sidebar.children().add(&disconnect_nav_button);
+
     let sidebar_frame = Border::new();
     sidebar_frame.set_background(Some(ui_kit::brush(ui_kit::RAIL)));
     sidebar_frame.set_padding(Thickness {
@@ -606,8 +597,6 @@ pub(crate) fn create_main_window() -> Ref<Window> {
         tip_bubble,
         tip_label,
         server_line: server_line.clone(),
-        settings_nav: settings_nav_button.clone(),
-        disconnect_nav: disconnect_nav_button.clone(),
         host,
         port,
         name,
