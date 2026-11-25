@@ -10,7 +10,7 @@ use crate::control::{
 };
 use crate::files::{
     CHUNK_BYTES, FileFrame, FileMessage, MAX_FILE_BYTES, MAX_FILE_NAME_CHARS, decode_frame,
-    download_dir, encode_chunk, human_size, sanitize_file_name, sha256_file, unique_path,
+    encode_chunk, human_size, sanitize_file_name, sha256_file, unique_path,
 };
 use rust_chat_client_core::{ClientHandle, IncomingSignal};
 use rust_chat_media::audio::{FRAME_SAMPLES, rms};
@@ -235,6 +235,7 @@ pub fn start(
     runtime: &tokio::runtime::Handle,
     turn: Option<TurnCredentials>,
     share: ShareSettings,
+    file_prefs: std::sync::Arc<crate::files::FilePrefs>,
 ) -> VoiceController {
     let signals = client.subscribe_signals();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -287,6 +288,7 @@ pub fn start(
         prepared_rx,
         transfers: HashMap::new(),
         files_shutdown,
+        file_prefs,
         last_file: None,
         viewer: None,
         viewer_pending: None,
@@ -414,6 +416,7 @@ struct VoiceRun {
     prepared_rx: mpsc::UnboundedReceiver<PreparedFile>,
     transfers: HashMap<String, Transfer>,
     files_shutdown: Arc<AtomicBool>,
+    file_prefs: std::sync::Arc<crate::files::FilePrefs>,
     last_file: Option<PathBuf>,
     viewer: Option<ViewerControl>,
     viewer_pending: Option<String>,
@@ -1201,7 +1204,7 @@ impl VoiceRun {
         else {
             return;
         };
-        let dir = match download_dir() {
+        let dir = match self.file_prefs.downloads_dir() {
             Ok(dir) => dir,
             Err(message) => {
                 self.fail_offer(&id, &peer, &message);

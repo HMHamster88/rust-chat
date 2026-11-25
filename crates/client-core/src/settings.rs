@@ -30,6 +30,17 @@ pub struct ClientSettings {
     pub share_height: u32,
     pub share_fps: u32,
     pub share_bitrate: u32,
+    /// Chat rows start with a local timestamp.
+    pub show_timestamps: bool,
+    /// 24-hour clock in chat; otherwise 12-hour with AM/PM.
+    pub clock_24h: bool,
+    /// Overrides the OS Downloads folder for received files.
+    pub downloads_dir: Option<String>,
+    /// Open a received file once its checksum matched.
+    pub open_when_finished: bool,
+    /// cpal device ids such as `input:1`; `None` means the system default.
+    pub mic_device: Option<String>,
+    pub speaker_device: Option<String>,
 }
 
 impl Default for ClientSettings {
@@ -52,6 +63,12 @@ impl Default for ClientSettings {
             share_height: 720,
             share_fps: 10,
             share_bitrate: 1_500_000,
+            show_timestamps: true,
+            clock_24h: true,
+            downloads_dir: None,
+            open_when_finished: false,
+            mic_device: None,
+            speaker_device: None,
         }
     }
 }
@@ -276,12 +293,61 @@ mod tests {
     }
 
     #[test]
+    fn appearance_defaults_survive_a_round_trip() {
+        let settings = ClientSettings {
+            show_timestamps: false,
+            clock_24h: false,
+            downloads_dir: Some(r"C:\Users\test\Downloads".into()),
+            open_when_finished: true,
+            mic_device: Some("input:1".into()),
+            speaker_device: Some("output:0".into()),
+            ..ClientSettings::default()
+        };
+        let text = serde_json::to_string(&settings).unwrap();
+        let loaded: ClientSettings = serde_json::from_str(&text).unwrap();
+        assert_eq!(loaded, settings);
+
+        let defaults = ClientSettings::default();
+        assert!(defaults.show_timestamps);
+        assert!(defaults.clock_24h);
+        assert_eq!(defaults.downloads_dir, None);
+        assert!(!defaults.open_when_finished);
+        assert_eq!(defaults.mic_device, None);
+    }
+
+    #[test]
     fn sanitize_is_stable_and_filesystem_safe() {
         let a = sanitize("127.0.0.1:8444");
         let b = sanitize("127.0.0.1:8444");
         assert_eq!(a, b);
         assert!(!a.contains(':'));
         assert_ne!(sanitize("a/b"), sanitize("a?b"));
+    }
+
+    #[test]
+    fn save_settings_persists_the_new_preferences() {
+        let dir =
+            std::env::temp_dir().join(format!("rust-chat-settings-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = SettingsStore::at(dir.join("settings.json"));
+        let settings = ClientSettings {
+            show_timestamps: false,
+            clock_24h: false,
+            downloads_dir: Some(r"C:\Downloads\chat".into()),
+            open_when_finished: true,
+            mic_device: Some("input:2".into()),
+            speaker_device: Some("output:0".into()),
+            ..ClientSettings::default()
+        };
+        store.save(&settings).unwrap();
+        let loaded = store.load();
+        assert!(!loaded.show_timestamps);
+        assert!(!loaded.clock_24h);
+        assert_eq!(loaded.downloads_dir.as_deref(), Some(r"C:\Downloads\chat"));
+        assert!(loaded.open_when_finished);
+        assert_eq!(loaded.mic_device.as_deref(), Some("input:2"));
+        assert_eq!(loaded.speaker_device.as_deref(), Some("output:0"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Opt-in because it writes to the real OS credential store:

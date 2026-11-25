@@ -13,9 +13,10 @@ use ferroui_base::layout::{HorizontalAlignment, Orientation, VerticalAlignment};
 use ferroui_base::media::Brushes;
 use ferroui_base::threading::{DispatcherPriority, DispatcherTimer};
 use ferroui_base::{FerroObjectImpl, Ref, Thickness, ferro_class, ferro_impl_classes, instantiate};
+use ferroui_controls::primitives::ScrollBarVisibility;
 use ferroui_controls::{
     AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Button, CheckBox, Control, Grid,
-    ItemsSource, ListBox, NewApplication, StackPanel, TextBlock, TextBox, Window,
+    ItemsSource, ListBox, NewApplication, ScrollViewer, StackPanel, TextBlock, TextBox, Window,
 };
 use ferroui_desktop::AppBuilderDesktopExtensions;
 use ferroui_media::MediaSubscription;
@@ -26,7 +27,7 @@ use rust_chat_client_core::{
     update,
 };
 use rust_chat_desktop::control::{DEFAULT_LEASE_SECS, InputEvent, RemoteButton, countdown};
-use rust_chat_desktop::files::human_size;
+use rust_chat_desktop::files::{FilePrefs, human_size};
 use rust_chat_desktop::video_surface::{VideoSurface, build_presenter};
 use rust_chat_desktop::voice::{self, ShareSettings, VoiceCommand, VoiceController, VoiceEvent};
 use rust_chat_media_desktop::audio::AudioIo;
@@ -107,6 +108,79 @@ const SHARE_PRESETS: &[(u32, u32, u32, u32)] = &[
 
 fn preset_label(preset: (u32, u32, u32, u32)) -> String {
     format!("{}x{}@{}", preset.0, preset.1, preset.2)
+}
+
+/// A pickable audio device, including the "system default" entry.
+struct DeviceChoice {
+    id: Option<String>,
+    label: String,
+}
+
+fn device_choices(devices: Vec<rust_chat_media::AudioDevice>) -> Vec<DeviceChoice> {
+    let mut choices = vec![DeviceChoice {
+        id: None,
+        label: "System default".to_owned(),
+    }];
+    for device in devices {
+        choices.push(DeviceChoice {
+            id: Some(device.id),
+            label: if device.is_default {
+                format!("{} (default)", device.name)
+            } else {
+                device.name
+            },
+        });
+    }
+    choices
+}
+
+fn device_index(choices: &[DeviceChoice], id: Option<&str>) -> usize {
+    id.and_then(|id| {
+        choices
+            .iter()
+            .position(|choice| choice.id.as_deref() == Some(id))
+    })
+    .unwrap_or(0)
+}
+
+/// Local wall-clock time for a chat timestamp (milliseconds since the Unix epoch).
+fn local_clock(ts_ms: i64, clock_24h: bool) -> String {
+    use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
+    use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
+    // 100 ns ticks between 1601-01-01 and 1970-01-01.
+    const EPOCH_OFFSET: i64 = 116_444_736_000_000_000;
+    let ticks = ts_ms.saturating_mul(10_000).saturating_add(EPOCH_OFFSET);
+    let utc_filetime = FILETIME {
+        dwLowDateTime: (ticks & 0xffff_ffff) as u32,
+        dwHighDateTime: (ticks >> 32) as u32,
+    };
+    let mut utc = SYSTEMTIME::default();
+    let mut local = SYSTEMTIME::default();
+    // SAFETY: both calls only read their input structs and write the output structs.
+    unsafe {
+        if FileTimeToSystemTime(&utc_filetime, &mut utc).is_err()
+            || SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_err()
+        {
+            return String::new();
+        }
+    }
+    if clock_24h {
+        format_clock(local.wHour, local.wMinute, true)
+    } else {
+        format_clock(local.wHour, local.wMinute, false)
+    }
+}
+
+fn format_clock(hour: u16, minute: u16, clock_24h: bool) -> String {
+    if clock_24h {
+        return format!("{hour:02}:{minute:02}");
+    }
+    let suffix = if hour < 12 { "AM" } else { "PM" };
+    let hour = match hour % 12 {
+        0 => 12,
+        other => other,
+    };
+    format!("{hour}:{minute:02} {suffix}")
 }
 
 struct VoiceRuntime {
@@ -219,6 +293,8 @@ struct Ui {
     voice_wanted: Cell<bool>,
     voice_room_id: RefCell<Option<String>>,
     voice: RefCell<Option<VoiceRuntime>>,
+    settings_screen: SettingsScreen,
+    file_prefs: std::sync::Arc<FilePrefs>,
 }
 
 impl Ui {
@@ -323,7 +399,11 @@ impl Ui {
         let Some(self_id) = snapshot.self_id.clone() else {
             return;
         };
-        let (audio, handle) = match AudioIo::start(None, None) {
+        let (mic, speaker) = {
+            let settings = self.settings.borrow();
+            (settings.mic_device.clone(), settings.speaker_device.clone())
+        };
+        let (audio, handle) = match AudioIo::start(mic.as_deref(), speaker.as_deref()) {
             Ok(value) => value,
             Err(error) => {
                 *self.voice_note.borrow_mut() = Some(format!("cannot start audio: {error}"));
@@ -337,6 +417,7 @@ impl Ui {
             &self.runtime,
             snapshot.turn.clone(),
             self.share_settings(),
+            self.file_prefs.clone(),
         );
         *self.voice.borrow_mut() = Some(VoiceRuntime {
             audio,
@@ -566,6 +647,217 @@ impl Ui {
         let _ = self.memory.save_settings(&settings);
     }
 
+    fn set_settings_visible(&self, open: bool) {
+        self.settings_screen.visible.set(open);
+        self.settings_screen.panel.set_is_visible(open);
+        if open {
+            self.refresh_settings();
+        }
+    }
+
+    /// Applies a change immediately: persisted to disk and pushed to the parts that hold a copy.
+    fn change_settings(&self, change: impl FnOnce(&mut ClientSettings)) {
+        let mut settings = self.settings.borrow().clone();
+        change(&mut settings);
+        *self.settings.borrow_mut() = settings.clone();
+        match self.memory.save_settings(&settings) {
+            Ok(()) => self.settings_screen.status.set_text(Some("Saved.")),
+            Err(error) => self
+                .settings_screen
+                .status
+                .set_text(Some(&format!("Cannot save: {error}"))),
+        }
+        self.client.set_keep_history(settings.keep_history);
+        self.file_prefs
+            .set_open_when_finished(settings.open_when_finished);
+        self.file_prefs
+            .set_downloads(settings.downloads_dir.as_ref().map(PathBuf::from));
+        self.refresh_settings();
+    }
+
+    fn refresh_settings(&self) {
+        let settings = self.settings.borrow().clone();
+        let screen = &self.settings_screen;
+        screen
+            .auto_connect
+            .set_is_checked(Some(settings.auto_connect));
+        screen
+            .timestamps
+            .set_is_checked(Some(settings.show_timestamps));
+        screen.clock24.set_is_checked(Some(settings.clock_24h));
+        screen
+            .keep_history
+            .set_is_checked(Some(settings.keep_history));
+        screen
+            .open_when_finished
+            .set_is_checked(Some(settings.open_when_finished));
+
+        let label = |choices: &[DeviceChoice], index: usize| {
+            choices
+                .get(index)
+                .map(|choice| choice.label.clone())
+                .unwrap_or_else(|| "System default".to_owned())
+        };
+        screen.mic.set_content(Some(Rc::new(format!(
+            "Microphone: {}",
+            label(&screen.inputs.borrow(), screen.input_index.get())
+        ))));
+        screen.speaker.set_content(Some(Rc::new(format!(
+            "Speakers: {}",
+            label(&screen.outputs.borrow(), screen.output_index.get())
+        ))));
+        screen.quality.set_content(Some(Rc::new(format!(
+            "Default quality: {}",
+            preset_label(SHARE_PRESETS[self.share_preset_index.get() % SHARE_PRESETS.len()])
+        ))));
+
+        let downloads = match &settings.downloads_dir {
+            Some(dir) => dir.clone(),
+            None => rust_chat_desktop::files::download_dir()
+                .map(|dir| format!("{} (default)", dir.display()))
+                .unwrap_or_else(|error| error),
+        };
+        screen
+            .downloads
+            .set_text(Some(&format!("Received files go to {downloads}")));
+        screen
+            .about_version
+            .set_text(Some(&format!("rust-chat {APP_VERSION}")));
+        screen.about_data.set_text(Some(&format!(
+            "Settings and history: {}",
+            rust_chat_client_core::settings::app_dir().display()
+        )));
+    }
+
+    fn cycle_device(&self, input: bool) {
+        let screen = &self.settings_screen;
+        let (choices, index) = if input {
+            (screen.inputs.borrow(), &screen.input_index)
+        } else {
+            (screen.outputs.borrow(), &screen.output_index)
+        };
+        if choices.is_empty() {
+            return;
+        }
+        let next = (index.get() + 1) % choices.len();
+        index.set(next);
+        let id = choices.get(next).and_then(|choice| choice.id.clone());
+        drop(choices);
+        if input {
+            self.change_settings(|settings| settings.mic_device = id);
+        } else {
+            self.change_settings(|settings| settings.speaker_device = id);
+        }
+    }
+
+    fn cycle_settings_quality(&self) {
+        let index = (self.share_preset_index.get() + 1) % SHARE_PRESETS.len();
+        self.share_preset_index.set(index);
+        self.share_quality.set_content(Some(Rc::new(format!(
+            "Quality: {}",
+            preset_label(SHARE_PRESETS[index])
+        ))));
+        let preset = SHARE_PRESETS[index];
+        self.change_settings(|settings| {
+            settings.share_width = preset.0;
+            settings.share_height = preset.1;
+            settings.share_fps = preset.2;
+            settings.share_bitrate = preset.3;
+        });
+        self.persist_share();
+    }
+
+    fn choose_downloads(&self) {
+        let Some(dir) = rfd::FileDialog::new().pick_folder() else {
+            return;
+        };
+        match rust_chat_desktop::files::ensure_download_dir(&dir) {
+            Ok(dir) => {
+                let text = dir.display().to_string();
+                self.change_settings(|settings| settings.downloads_dir = Some(text));
+            }
+            Err(error) => self.settings_screen.status.set_text(Some(&error)),
+        }
+    }
+
+    fn reset_downloads(&self) {
+        self.change_settings(|settings| settings.downloads_dir = None);
+    }
+
+    /// Arms a destructive action so it takes a second click.
+    fn arm_confirm(&self, action: ConfirmAction) {
+        let prompt = match action {
+            ConfirmAction::ForgetPin => {
+                "Forget the pinned server key? The next connection needs a new approval."
+            }
+            ConfirmAction::ClearHistory => "Delete the saved transcript of this room from disk?",
+        };
+        *self.settings_screen.pending.borrow_mut() = Some(action);
+        self.settings_screen.confirm_text.set_text(Some(prompt));
+        self.settings_screen.confirm.set_is_visible(true);
+        self.settings_screen.cancel.set_is_visible(true);
+    }
+
+    fn cancel_confirm(&self) {
+        *self.settings_screen.pending.borrow_mut() = None;
+        self.settings_screen.confirm_text.set_text(Some(""));
+        self.settings_screen.confirm.set_is_visible(false);
+        self.settings_screen.cancel.set_is_visible(false);
+    }
+
+    fn run_confirm(&self) {
+        let Some(action) = self.settings_screen.pending.borrow_mut().take() else {
+            return;
+        };
+        self.cancel_confirm();
+        match action {
+            ConfirmAction::ForgetPin => {
+                let (host, port) = {
+                    let settings = self.settings.borrow();
+                    (settings.host.clone(), settings.port)
+                };
+                let _ = self.client.forget_pin(host, port);
+                self.settings_screen
+                    .status
+                    .set_text(Some("Pinned key forgotten."));
+            }
+            ConfirmAction::ClearHistory => self.clear_local_history(),
+        }
+    }
+
+    fn clear_local_history(&self) {
+        let (endpoint, room) = {
+            let settings = self.settings.borrow();
+            let room = self
+                .client
+                .snapshot()
+                .room
+                .as_ref()
+                .map(|room| room.room.id.clone())
+                .or_else(|| settings.last_room_id.clone());
+            (format!("{}:{}", settings.host, settings.port), room)
+        };
+        let Some(room) = room else {
+            self.settings_screen
+                .status
+                .set_text(Some("Join a room first."));
+            return;
+        };
+        let store = rust_chat_client_core::history::HistoryStore::new();
+        let result = store.clear(&endpoint, &room);
+        self.client.clear_messages();
+        match result {
+            Ok(()) => self
+                .settings_screen
+                .status
+                .set_text(Some(&format!("Cleared the saved history of {room}."))),
+            Err(error) => self
+                .settings_screen
+                .status
+                .set_text(Some(&format!("Cannot clear history: {error}"))),
+        }
+    }
+
     fn request_control(&self) {
         let snapshot = self.client.snapshot();
         let Some(room) = snapshot.room.as_ref() else {
@@ -681,9 +973,7 @@ impl Ui {
     fn open_last_file(&self) {
         let path = self.file_last.borrow().clone();
         if let Some(path) = path {
-            let _ = std::process::Command::new("cmd")
-                .args(["/C", "start", "", &path.display().to_string()])
-                .spawn();
+            open_path(&path.display().to_string());
         }
     }
 
@@ -841,6 +1131,242 @@ impl Ui {
     }
 }
 
+/// A destructive action that needs a second click.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ConfirmAction {
+    ForgetPin,
+    ClearHistory,
+}
+
+/// Controls of the settings screen. Everything is persisted on change.
+struct SettingsScreen {
+    panel: Ref<ScrollViewer>,
+    open_room: Ref<Button>,
+    open_connect: Ref<Button>,
+    close: Ref<Button>,
+    status: Ref<TextBlock>,
+    auto_connect: Ref<CheckBox>,
+    timestamps: Ref<CheckBox>,
+    clock24: Ref<CheckBox>,
+    keep_history: Ref<CheckBox>,
+    open_when_finished: Ref<CheckBox>,
+    mic: Ref<Button>,
+    speaker: Ref<Button>,
+    quality: Ref<Button>,
+    downloads: Ref<TextBlock>,
+    choose_downloads: Ref<Button>,
+    reset_downloads: Ref<Button>,
+    about_version: Ref<TextBlock>,
+    about_data: Ref<TextBlock>,
+    forget_pin: Ref<Button>,
+    clear_history: Ref<Button>,
+    pending: RefCell<Option<ConfirmAction>>,
+    confirm_text: Ref<TextBlock>,
+    confirm: Ref<Button>,
+    cancel: Ref<Button>,
+    inputs: RefCell<Vec<DeviceChoice>>,
+    outputs: RefCell<Vec<DeviceChoice>>,
+    input_index: Cell<usize>,
+    output_index: Cell<usize>,
+    visible: Cell<bool>,
+}
+
+fn small_button(label: &str) -> Ref<Button> {
+    let button = Button::new();
+    button.set_content(Some(Rc::new(label.to_owned())));
+    button
+}
+
+fn checkbox(label: &str, checked: bool) -> Ref<CheckBox> {
+    let box_ = CheckBox::new();
+    box_.set_content(Some(Rc::new(label.to_owned())));
+    box_.set_is_checked(Some(checked));
+    box_
+}
+
+fn section(panel: &Ref<StackPanel>, title: &str) {
+    panel.children().add(text(title, 12.0));
+}
+
+fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
+    let devices = rust_chat_media_desktop::audio::audio_devices();
+    let inputs = device_choices(devices.inputs);
+    let outputs = device_choices(devices.outputs);
+    let input_index = device_index(&inputs, settings.mic_device.as_deref());
+    let output_index = device_index(&outputs, settings.speaker_device.as_deref());
+
+    let panel_content = StackPanel::new();
+    panel_content.set_spacing(8.0);
+    let panel = ScrollViewer::new();
+    panel.set_vertical_scroll_bar_visibility(ScrollBarVisibility::Auto);
+    panel.set_horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled);
+    panel.set_content(Some(Control::boxed(panel_content.clone())));
+    panel.set_is_visible(false);
+
+    let open_room = small_button("Settings");
+    let open_connect = small_button("Settings");
+    let close = small_button("Close");
+    let title_row = row();
+    title_row.children().add(text("SETTINGS", 22.0));
+    title_row.children().add(close.clone());
+
+    let status = text("", 12.0);
+
+    let auto_connect = checkbox("Connect automatically on start", settings.auto_connect);
+    let forget_pin = small_button("Forget pinned key");
+
+    let timestamps = checkbox("Show timestamps", settings.show_timestamps);
+    let clock24 = checkbox("24-hour clock", settings.clock_24h);
+    let keep_history = checkbox("Keep history on disk", settings.keep_history);
+    let clear_history = small_button("Clear local history");
+
+    let mic = small_button("Microphone: system default");
+    let speaker = small_button("Speakers: system default");
+    let quality = small_button("Default quality");
+
+    let downloads = text("", 12.0);
+    let choose_downloads = small_button("Choose…");
+    let reset_downloads = small_button("Use Downloads");
+    let downloads_row = row();
+    downloads_row.children().add(choose_downloads.clone());
+    downloads_row.children().add(reset_downloads.clone());
+    let open_when_finished = checkbox(
+        "Open received files when finished",
+        settings.open_when_finished,
+    );
+
+    let about_version = text("", 12.0);
+    let about_data = text("", 12.0);
+
+    let confirm_text = text("", 13.0);
+    let confirm = small_button("Confirm");
+    let cancel = small_button("Cancel");
+    confirm.set_is_visible(false);
+    cancel.set_is_visible(false);
+    let confirm_row = row();
+    confirm_row.children().add(confirm_text.clone());
+    confirm_row.children().add(confirm.clone());
+    confirm_row.children().add(cancel.clone());
+
+    panel_content.children().add(title_row);
+    panel_content.children().add(status.clone());
+
+    section(&panel_content, "CONNECTION");
+    panel_content.children().add(auto_connect.clone());
+    let connection_row = row();
+    connection_row.children().add(forget_pin.clone());
+    panel_content.children().add(connection_row);
+
+    section(&panel_content, "CHAT");
+    panel_content.children().add(timestamps.clone());
+    panel_content.children().add(clock24.clone());
+    panel_content.children().add(keep_history.clone());
+    let chat_row = row();
+    chat_row.children().add(clear_history.clone());
+    panel_content.children().add(chat_row);
+
+    section(&panel_content, "AUDIO");
+    let audio_row = row();
+    audio_row.children().add(mic.clone());
+    audio_row.children().add(speaker.clone());
+    panel_content.children().add(audio_row);
+    panel_content
+        .children()
+        .add(text("Devices apply the next time you join voice.", 12.0));
+
+    section(&panel_content, "SCREEN SHARING");
+    let quality_row = row();
+    quality_row.children().add(quality.clone());
+    panel_content.children().add(quality_row);
+
+    section(&panel_content, "FILES");
+    panel_content.children().add(downloads.clone());
+    panel_content.children().add(downloads_row);
+    panel_content.children().add(open_when_finished.clone());
+
+    section(&panel_content, "ABOUT");
+    panel_content.children().add(about_version.clone());
+    panel_content.children().add(about_data.clone());
+
+    panel_content.children().add(confirm_row);
+
+    SettingsScreen {
+        panel,
+        open_room,
+        open_connect,
+        close,
+        status,
+        auto_connect,
+        timestamps,
+        clock24,
+        keep_history,
+        open_when_finished,
+        mic,
+        speaker,
+        quality,
+        downloads,
+        choose_downloads,
+        reset_downloads,
+        about_version,
+        about_data,
+        forget_pin,
+        clear_history,
+        pending: RefCell::new(None),
+        confirm_text,
+        confirm,
+        cancel,
+        inputs: RefCell::new(inputs),
+        outputs: RefCell::new(outputs),
+        input_index: Cell::new(input_index),
+        output_index: Cell::new(output_index),
+        visible: Cell::new(false),
+    }
+}
+
+/// The desktop work area in physical pixels.
+#[derive(Clone, Copy)]
+struct WorkArea {
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+}
+
+fn work_area() -> Option<WorkArea> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{SPI_GETWORKAREA, SystemParametersInfoW};
+    let mut rect = RECT::default();
+    // SAFETY: the call only writes the RECT that was passed by pointer.
+    let result = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut rect as *mut RECT as *mut std::ffi::c_void),
+            Default::default(),
+        )
+    };
+    result.is_ok().then(|| WorkArea {
+        left: rect.left,
+        top: rect.top,
+        width: (rect.right - rect.left).max(0) as u32,
+        height: (rect.bottom - rect.top).max(0) as u32,
+    })
+}
+
+/// Physical pixels per logical pixel for the system DPI.
+fn system_scale() -> f64 {
+    use windows::Win32::UI::HiDpi::GetDpiForSystem;
+    let dpi = unsafe { GetDpiForSystem() } as f64;
+    if dpi > 0.0 { dpi / 96.0 } else { 1.0 }
+}
+
+/// Opens a file or URL with its default handler.
+fn open_path(target: &str) {
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", target])
+        .spawn();
+}
+
 fn remote_button(button: ferroui_base::input::MouseButton) -> Option<RemoteButton> {
     match button {
         ferroui_base::input::MouseButton::Left => Some(RemoteButton::Left),
@@ -909,6 +1435,7 @@ fn create_main_window() -> Ref<Window> {
     };
     let settings = startup.settings.clone();
     let password = startup.password.clone();
+    let settings_screen = build_settings_screen(&settings);
 
     let host = TextBox::new();
     host.set_text(Some(&settings.host));
@@ -1000,6 +1527,7 @@ fn create_main_window() -> Ref<Window> {
     let actions = row();
     actions.children().add(connect_button.clone());
     actions.children().add(forget.clone());
+    actions.children().add(settings_screen.open_connect.clone());
     connect_panel.children().add(actions);
     connect_panel.children().add(connect_status.clone());
     connect_panel.children().add(trust_panel.clone());
@@ -1161,6 +1689,9 @@ fn create_main_window() -> Ref<Window> {
     disconnect.set_content(Some(Rc::new("Disconnect".to_string())));
     let room_actions = row();
     room_actions.children().add(disconnect.clone());
+    room_actions
+        .children()
+        .add(settings_screen.open_room.clone());
 
     let room_panel = StackPanel::new();
     room_panel.set_spacing(10.0);
@@ -1188,8 +1719,14 @@ fn create_main_window() -> Ref<Window> {
     root.set_vertical_alignment(VerticalAlignment::Stretch);
     root.children().add(connect_panel.clone());
     root.children().add(room_panel.clone());
+    root.children().add(settings_screen.panel.clone());
     root.children().add(error_text.clone());
     root.children().add(update_row);
+
+    let file_prefs = FilePrefs::new(
+        settings.downloads_dir.as_ref().map(PathBuf::from),
+        settings.open_when_finished,
+    );
 
     let ui = Rc::new(Ui {
         client: startup.client,
@@ -1287,6 +1824,8 @@ fn create_main_window() -> Ref<Window> {
         voice_wanted: Cell::new(false),
         voice_room_id: RefCell::new(None),
         voice: RefCell::new(None),
+        settings_screen,
+        file_prefs,
     });
 
     wire(&ui);
@@ -1310,11 +1849,30 @@ fn create_main_window() -> Ref<Window> {
         ui.tls.set_is_checked(Some(request.tls));
         let _ = ui.client.connect(request);
     }
+    if std::env::var_os("RUST_CHAT_OPEN_SETTINGS").is_some() {
+        ui.set_settings_visible(true);
+    }
 
     let window = Window::new();
     window.set_title(Some(format!("rust-chat {APP_VERSION}")));
-    window.set_width(1100.0);
-    window.set_height(920.0);
+    let area = work_area();
+    let scale = system_scale();
+    let height = area
+        .map(|area| (f64::from(area.height) / scale - 120.0).clamp(600.0, 920.0))
+        .unwrap_or(920.0);
+    let width = area
+        .map(|area| (f64::from(area.width) / scale - 60.0).clamp(760.0, 1100.0))
+        .unwrap_or(1100.0);
+    window.set_width(width);
+    window.set_height(height);
+    if let Some(area) = area {
+        // Center in the work area so a short screen never pushes the window under the taskbar.
+        let outer_width = ((width + 16.0) * scale).round() as i32;
+        let outer_height = ((height + 40.0) * scale).round() as i32;
+        let x = area.left + (area.width as i32 - outer_width).max(0) / 2;
+        let y = area.top + (area.height as i32 - outer_height).max(0) / 2;
+        window.set_position(ferroui_base::PixelPoint { x, y });
+    }
     window.set_padding(Thickness::uniform(18.0));
     window.set_content(Some(Control::boxed(root)));
     window
@@ -1542,6 +2100,152 @@ fn wire(ui: &Rc<Ui>) {
             }
         }
     });
+
+    let screen = &ui.settings_screen;
+    for button in [screen.open_room.clone(), screen.open_connect.clone()] {
+        button.click({
+            let weak = Rc::downgrade(ui);
+            move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_settings_visible(true);
+                }
+            }
+        });
+    }
+    screen.close.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cancel_confirm();
+                ui.set_settings_visible(false);
+            }
+        }
+    });
+    screen.auto_connect.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                let checked = ui
+                    .settings_screen
+                    .auto_connect
+                    .is_checked()
+                    .unwrap_or(false);
+                ui.change_settings(|settings| settings.auto_connect = checked);
+            }
+        }
+    });
+    screen.timestamps.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                let checked = ui.settings_screen.timestamps.is_checked().unwrap_or(true);
+                ui.change_settings(|settings| settings.show_timestamps = checked);
+            }
+        }
+    });
+    screen.clock24.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                let checked = ui.settings_screen.clock24.is_checked().unwrap_or(true);
+                ui.change_settings(|settings| settings.clock_24h = checked);
+            }
+        }
+    });
+    screen.keep_history.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                let checked = ui.settings_screen.keep_history.is_checked().unwrap_or(true);
+                ui.change_settings(|settings| settings.keep_history = checked);
+            }
+        }
+    });
+    screen.open_when_finished.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                let checked = ui
+                    .settings_screen
+                    .open_when_finished
+                    .is_checked()
+                    .unwrap_or(false);
+                ui.change_settings(|settings| settings.open_when_finished = checked);
+            }
+        }
+    });
+    screen.mic.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cycle_device(true);
+            }
+        }
+    });
+    screen.speaker.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cycle_device(false);
+            }
+        }
+    });
+    screen.quality.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cycle_settings_quality();
+            }
+        }
+    });
+    screen.choose_downloads.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.choose_downloads();
+            }
+        }
+    });
+    screen.reset_downloads.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.reset_downloads();
+            }
+        }
+    });
+    screen.forget_pin.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.arm_confirm(ConfirmAction::ForgetPin);
+            }
+        }
+    });
+    screen.clear_history.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.arm_confirm(ConfirmAction::ClearHistory);
+            }
+        }
+    });
+    screen.confirm.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.run_confirm();
+            }
+        }
+    });
+    screen.cancel.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cancel_confirm();
+            }
+        }
+    });
 }
 
 fn attach_control_input(ui: &Rc<Ui>) {
@@ -1614,8 +2318,11 @@ fn attach_control_input(ui: &Rc<Ui>) {
 fn refresh(ui: &Rc<Ui>) {
     let snapshot = ui.client.snapshot();
     let room_visible = snapshot.room.is_some();
-    ui.room_panel.set_is_visible(room_visible);
-    ui.connect_panel.set_is_visible(!room_visible);
+    let settings_open = ui.settings_screen.visible.get();
+    ui.room_panel.set_is_visible(room_visible && !settings_open);
+    ui.connect_panel
+        .set_is_visible(!room_visible && !settings_open);
+    ui.settings_screen.panel.set_is_visible(settings_open);
 
     let mut status = snapshot.connection.label();
     if let ConnectionState::Failed(failure) = &snapshot.connection
@@ -1763,14 +2470,29 @@ fn refresh(ui: &Rc<Ui>) {
             .last()
             .map(|message| message.message_id.as_str())
             .unwrap_or("");
-        let messages_signature =
-            format!("{}:{}:{}", room.room.id, snapshot.messages.len(), last_id);
+        let appearance = {
+            let settings = ui.settings.borrow();
+            (settings.show_timestamps, settings.clock_24h)
+        };
+        let messages_signature = format!(
+            "{}:{}:{}:{}:{}",
+            room.room.id,
+            snapshot.messages.len(),
+            last_id,
+            appearance.0,
+            appearance.1
+        );
         if *ui.last_messages.borrow() != messages_signature {
             *ui.last_messages.borrow_mut() = messages_signature;
             ui.message_model.clear();
             for message in snapshot.messages.iter().rev() {
+                let stamp = if appearance.0 {
+                    format!("[{}] ", local_clock(message.ts, appearance.1))
+                } else {
+                    String::new()
+                };
                 ui.message_model
-                    .add(format!("{}: {}", message.name, message.text));
+                    .add(format!("{stamp}{}: {}", message.name, message.text));
             }
         }
     } else {
@@ -1944,7 +2666,10 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
                             .unwrap_or_else(|| "file".to_owned());
                         *ui.file_line.borrow_mut() = format!("saved {name} to {path}");
                         *ui.file_active.borrow_mut() = None;
-                        *ui.file_last.borrow_mut() = Some(PathBuf::from(path));
+                        *ui.file_last.borrow_mut() = Some(PathBuf::from(&path));
+                        if ui.file_prefs.open_when_finished() {
+                            open_path(&path);
+                        }
                     }
                     Some(VoiceEvent::FileFailed { id, message }) => {
                         *ui.file_line.borrow_mut() = format!("file: {message}");
@@ -2198,4 +2923,45 @@ fn main() -> std::process::ExitCode {
         .use_platform_detect()
         .start_with_classic_desktop_lifetime(&args);
     std::process::ExitCode::from(exit_code as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clock_formats_both_styles() {
+        assert_eq!(format_clock(0, 5, true), "00:05");
+        assert_eq!(format_clock(13, 40, true), "13:40");
+        assert_eq!(format_clock(0, 5, false), "12:05 AM");
+        assert_eq!(format_clock(11, 59, false), "11:59 AM");
+        assert_eq!(format_clock(12, 0, false), "12:00 PM");
+        assert_eq!(format_clock(23, 7, false), "11:07 PM");
+    }
+
+    #[test]
+    fn device_lists_start_with_the_system_default() {
+        let choices = device_choices(vec![
+            rust_chat_media::AudioDevice {
+                id: "input:0".into(),
+                name: "Microphone".into(),
+                is_default: true,
+            },
+            rust_chat_media::AudioDevice {
+                id: "input:1".into(),
+                name: "Headset".into(),
+                is_default: false,
+            },
+        ]);
+        assert_eq!(choices.len(), 3);
+        assert_eq!(choices[0].id, None);
+        assert_eq!(choices[0].label, "System default");
+        assert_eq!(choices[1].label, "Microphone (default)");
+        assert_eq!(choices[2].id.as_deref(), Some("input:1"));
+
+        assert_eq!(device_index(&choices, None), 0);
+        assert_eq!(device_index(&choices, Some("input:1")), 2);
+        // A device that disappeared since the last run falls back to the default.
+        assert_eq!(device_index(&choices, Some("input:9")), 0);
+    }
 }

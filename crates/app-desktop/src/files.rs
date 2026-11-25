@@ -169,11 +169,60 @@ pub fn download_dir() -> Result<PathBuf, String> {
             .or_else(|| directories::UserDirs::new().map(|dirs| dirs.home_dir().join("Downloads")))
             .ok_or_else(|| "no home directory for downloads".to_owned())?
     };
-    std::fs::create_dir_all(&dir).map_err(|error| format!("cannot create {dir:?}: {error}"))?;
+    ensure_download_dir(&dir)
+}
+
+/// Creates the folder and proves it is writable, so a bad choice fails at accept time with a
+/// readable message instead of halfway through a transfer.
+pub fn ensure_download_dir(dir: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir)
+        .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
     let probe = dir.join(format!(".rust-chat-write-{}", std::process::id()));
-    std::fs::write(&probe, b"ok").map_err(|error| format!("{dir:?} is not writable: {error}"))?;
+    std::fs::write(&probe, b"ok")
+        .map_err(|error| format!("{} is not writable: {error}", dir.display()))?;
     let _ = std::fs::remove_file(&probe);
-    Ok(dir)
+    Ok(dir.to_path_buf())
+}
+
+/// File settings shared with the voice session, which accepts transfers on another thread.
+#[derive(Debug, Default)]
+pub struct FilePrefs {
+    downloads: std::sync::Mutex<Option<PathBuf>>,
+    open_when_finished: std::sync::atomic::AtomicBool,
+}
+
+impl FilePrefs {
+    pub fn new(downloads: Option<PathBuf>, open_when_finished: bool) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            downloads: std::sync::Mutex::new(downloads),
+            open_when_finished: std::sync::atomic::AtomicBool::new(open_when_finished),
+        })
+    }
+
+    pub fn set_downloads(&self, dir: Option<PathBuf>) {
+        if let Ok(mut slot) = self.downloads.lock() {
+            *slot = dir;
+        }
+    }
+
+    pub fn set_open_when_finished(&self, value: bool) {
+        self.open_when_finished
+            .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn open_when_finished(&self) -> bool {
+        self.open_when_finished
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The configured folder when it is still usable, otherwise the OS default.
+    pub fn downloads_dir(&self) -> Result<PathBuf, String> {
+        let configured = self.downloads.lock().ok().and_then(|dir| dir.clone());
+        match configured {
+            Some(dir) => ensure_download_dir(&dir).or_else(|_| download_dir()),
+            None => download_dir(),
+        }
+    }
 }
 
 pub fn sha256_file(path: &Path) -> Result<String, String> {

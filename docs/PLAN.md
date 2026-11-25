@@ -466,14 +466,18 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 - Remaining: image previews and open-when-finished by default (the Open button exists); resume is
   still explicitly not supported.
 
-### M7 — desktop polish (next)
+### M7 — desktop polish (in progress)
 
-- Settings screen: connection, audio/video devices, chat (clock/scale/history), files, appearance,
-  about; immediate apply and destructive-action confirmations.
-- File image previews and “open when finished”; drag-and-drop paths; progress list for multiple
-  transfers rather than one active row.
-- UI accessibility names for automation, keyboard navigation, Enter-to-send/Shift+Enter, IME polish.
-- 1-hour soak with 4 clients, memory/CPU regression checks, and a TURN-relayed transfer exercise.
+- **Settings screen (landed):** connection (auto-connect, forget pinned key), chat (timestamps,
+  24-hour clock, keep history, clear local history), audio devices, default share quality, received
+  files folder with "open when finished", and About. Changes apply immediately and are persisted;
+  destructive actions need a confirmation click. The window is sized/centred for the work area and
+  the panel scrolls.
+- **Still to do:** file image previews and drag-and-drop paths plus a multi-transfer progress list;
+  accessibility names, keyboard navigation, Enter-to-send/Shift+Enter and IME polish; a 1-hour
+  soak with 4 clients, memory/CPU regression checks, and a TURN-relayed transfer exercise.
+- Later in M8: the room panel should scroll the same way once the video presenter can live inside a
+  scroller.
 
 ### M8 — releases and updates
 

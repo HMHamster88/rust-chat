@@ -3,6 +3,23 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- Settings screen (M7): connection (auto-connect, forget pinned key), chat (timestamps, 24-hour
+  clock, keep history, clear local history), audio devices, default share quality, received-files
+  folder with "open when finished", and an About section. Every change is persisted immediately;
+  destructive actions need a second click.
+- The desktop window is sized and centered in the work area, and the settings panel scrolls, so
+  nothing is cut off on screens shorter than 920 px.
+
+### Changed
+
+- `ClientSettings` gained `showTimestamps`, `clock24h`, `downloadsDir`, `openWhenFinished`,
+  `micDevice` and `speakerDevice`; older settings files keep working.
+- Chat rows show a local timestamp by default.
+
 ## [0.1.5] — 2026-11-25
 
 ### Changed

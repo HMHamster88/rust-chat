@@ -59,6 +59,8 @@ pub enum Command {
         host: String,
         port: u16,
     },
+    /// Drops the in-memory transcript (the file on disk is cleared by the caller).
+    ClearMessages,
 }
 
 /// An SDP/ICE payload forwarded by the server. The signal body stays opaque.
@@ -73,6 +75,7 @@ pub struct ClientHandle {
     snapshot: watch::Receiver<ChatSnapshot>,
     commands: mpsc::Sender<Command>,
     signals: tokio::sync::broadcast::Sender<IncomingSignal>,
+    keep_history: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ClientHandle {
@@ -89,6 +92,8 @@ impl ClientHandle {
         let (commands_tx, commands_rx) = mpsc::channel(64);
         let (snapshot_tx, snapshot_rx) = watch::channel(ChatSnapshot::default());
         let (signal_tx, _) = tokio::sync::broadcast::channel(64);
+        let keep_history =
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(settings.keep_history));
         let task = ClientTask {
             settings,
             snapshot_tx,
@@ -97,13 +102,22 @@ impl ClientHandle {
             pins: PinStore::at(root.join("pins.json")),
             history: HistoryStore::at(root.clone()),
             settings_store: SettingsStore::at(root.join("settings.json")),
+            keep_history: keep_history.clone(),
         };
         runtime.spawn(task.run());
         Self {
             snapshot: snapshot_rx,
             commands: commands_tx,
             signals: signal_tx,
+            keep_history,
         }
+    }
+
+    /// Applies a settings change that the client honours for the next message instead of
+    /// waiting for a reconnect.
+    pub fn set_keep_history(&self, keep: bool) {
+        self.keep_history
+            .store(keep, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn snapshot(&self) -> ChatSnapshot {
@@ -183,6 +197,11 @@ impl ClientHandle {
         })
     }
 
+    /// Clears the transcript shown in the room panel. The history file is removed separately.
+    pub fn clear_messages(&self) -> bool {
+        self.send(Command::ClearMessages)
+    }
+
     fn send(&self, command: Command) -> bool {
         self.commands.try_send(command).is_ok()
     }
@@ -196,6 +215,7 @@ struct ClientTask {
     pins: PinStore,
     history: HistoryStore,
     settings_store: SettingsStore,
+    keep_history: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct Session {
@@ -235,6 +255,7 @@ impl ClientTask {
                         self.update(|snapshot| snapshot.server_fingerprint = None);
                     }
                 }
+                Some(Command::ClearMessages) => self.update(|snapshot| snapshot.messages.clear()),
                 Some(Command::Disconnect) | None => {
                     self.set_idle();
                     return;
@@ -598,6 +619,9 @@ impl ClientTask {
                     Some(Command::ForgetPin { host, port }) => {
                         let _ = self.pins.forget(&host, port);
                     }
+                    Some(Command::ClearMessages) => {
+                        self.update(|snapshot| snapshot.messages.clear());
+                    }
                     Some(Command::Trust(_)) | Some(Command::Connect(_)) => {}
                 },
                 message = tls::next_envelope(&mut session.socket) => match message {
@@ -792,7 +816,7 @@ impl ClientTask {
         {
             return;
         }
-        if self.settings.keep_history {
+        if self.keep_history.load(std::sync::atomic::Ordering::Relaxed) {
             let _ = self
                 .history
                 .append(&request.endpoint(), &message.room_id, &message);

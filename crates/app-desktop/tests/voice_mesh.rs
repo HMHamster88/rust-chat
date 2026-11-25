@@ -28,6 +28,10 @@ struct FakeAudio {
     playout: Playout,
 }
 
+fn file_prefs() -> Arc<rust_chat_desktop::files::FilePrefs> {
+    rust_chat_desktop::files::FilePrefs::new(None, false)
+}
+
 fn fake_audio() -> FakeAudio {
     let (frame_tx, frames) = mpsc::unbounded_channel();
     let (event_tx, events) = mpsc::unbounded_channel();
@@ -140,6 +144,7 @@ async fn two_clients_exchange_opus_through_the_server() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
     let mut bob_voice = voice::start(
         bob.clone(),
@@ -148,6 +153,7 @@ async fn two_clients_exchange_opus_through_the_server() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
 
     // Announce voice and wait until both authoritative member lists see it.
@@ -275,6 +281,7 @@ async fn files_transfer_and_cancel_between_two_clients() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
     let mut bob_voice = voice::start(
         bob.clone(),
@@ -283,6 +290,7 @@ async fn files_transfer_and_cancel_between_two_clients() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
     let _ = alice.set_voice(true);
     let _ = bob.set_voice(true);
@@ -458,6 +466,7 @@ async fn one_gib_transfer_matches_sha256() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
     let mut bob_voice = voice::start(
         bob.clone(),
@@ -466,6 +475,7 @@ async fn one_gib_transfer_matches_sha256() {
         &tokio::runtime::Handle::current(),
         None,
         ShareSettings::default(),
+        file_prefs(),
     );
     let _ = alice.set_voice(true);
     let _ = bob.set_voice(true);
@@ -592,6 +602,7 @@ async fn four_clients_mesh_audio_and_survive_a_leave() {
             &tokio::runtime::Handle::current(),
             None,
             ShareSettings::default(),
+            file_prefs(),
         );
         audios.push((frames, playout));
         _event_keepers.push(_events);
