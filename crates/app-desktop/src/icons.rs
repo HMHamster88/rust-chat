@@ -10,7 +10,7 @@
 use ferroui_base::Ref;
 use ferroui_base::media::{FontFamily, FontManager, FontSimulations};
 use ferroui_controls::automation::AutomationProperties;
-use ferroui_controls::{Button, StackPanel, TextBlock, ToolTip};
+use ferroui_controls::{Button, StackPanel, TextBlock};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -133,7 +133,8 @@ pub fn icon(glyph: Icon, size: f64) -> Ref<TextBlock> {
     block
 }
 
-/// A square button that shows only the glyph, with a tooltip and an automation name.
+/// A square button that shows only the glyph, with an automation name. Hover tooltips are wired
+/// from the registry below, because they need the window's tooltip layer.
 pub fn icon_button(glyph: Icon, name: &str) -> Ref<Button> {
     let button = Button::new();
     let content = icon(glyph, 16.0);
@@ -147,10 +148,18 @@ pub fn icon_button(glyph: Icon, name: &str) -> Ref<Button> {
     button.set_vertical_content_alignment(ferroui_base::layout::VerticalAlignment::Center);
     AutomationProperties::set_name(&button, Some(name));
     AutomationProperties::set_help_text(&button, Some(name));
-    let tip = ToolTip::new();
-    tip.set_content(Some(Rc::new(name.to_owned())));
-    button.set_value(ToolTip::tool_tip_property(), Some(tip));
+    BUTTONS.with(|buttons| buttons.borrow_mut().push((button.clone(), name.to_owned())));
     button
+}
+
+thread_local! {
+    /// Icon buttons created so far, so the window can attach hover tooltips after building the tree.
+    static BUTTONS: RefCell<Vec<(Ref<Button>, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Drains the registered icon buttons (called once, when the window is wired).
+pub fn take_buttons() -> Vec<(Ref<Button>, String)> {
+    BUTTONS.with(|buttons| std::mem::take(&mut *buttons.borrow_mut()))
 }
 
 /// A button face with the glyph and a text label, for actions that stay readable.

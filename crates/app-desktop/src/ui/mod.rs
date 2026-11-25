@@ -11,9 +11,9 @@ use ferroui_base::threading::{DispatcherPriority, DispatcherTimer};
 use ferroui_base::{CornerRadius, Ref, Thickness};
 use ferroui_controls::primitives::ScrollBarVisibility;
 use ferroui_controls::{
-    Border, Button, CheckBox, ColumnDefinition, ColumnDefinitions, Control, Grid, GridLength,
-    GridUnitType, RowDefinition, RowDefinitions, ScrollViewer, StackPanel, TextBlock, TextBox,
-    Window,
+    Border, Button, Canvas, CheckBox, ColumnDefinition, ColumnDefinitions, Control, Grid,
+    GridLength, GridUnitType, RowDefinition, RowDefinitions, ScrollViewer, StackPanel, TextBlock,
+    TextBox, Window,
 };
 use ferroui_media::MediaSubscription;
 use ferroui_media_controls::TexturePresenter;
@@ -126,6 +126,9 @@ struct Ui {
     pub(crate) room_view: Ref<Grid>,
     pub(crate) stage_frame: Ref<Border>,
     pub(crate) file_card: Ref<Border>,
+    pub(crate) tip_layer: Ref<Canvas>,
+    pub(crate) tip_bubble: Ref<Border>,
+    pub(crate) tip_label: Ref<TextBlock>,
     pub(crate) server_line: Ref<TextBlock>,
     pub(crate) settings_nav: Ref<Button>,
     pub(crate) disconnect_nav: Ref<Button>,
@@ -603,6 +606,21 @@ impl Ui {
         settings.check_for_updates = checked;
         *self.settings.borrow_mut() = settings.clone();
         let _ = self.memory.save_settings(&settings);
+    }
+
+    /// Shows the hover hint at a point measured in the tooltip layer's coordinates.
+    fn show_tip(&self, label: &str, at: ferroui_base::Point) {
+        self.tip_label.set_text(Some(label));
+        let bounds = self.tip_layer.bounds();
+        let max_x = (bounds.right() - 130.0).max(0.0);
+        let max_y = (bounds.bottom() - 40.0).max(0.0);
+        Canvas::set_left(&self.tip_bubble, (at.x + 14.0).min(max_x));
+        Canvas::set_top(&self.tip_bubble, (at.y + 18.0).min(max_y));
+        self.tip_bubble.set_is_visible(true);
+    }
+
+    fn hide_tip(&self) {
+        self.tip_bubble.set_is_visible(false);
     }
 
     fn set_settings_visible(&self, open: bool) {

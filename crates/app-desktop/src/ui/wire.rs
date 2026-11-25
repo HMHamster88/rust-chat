@@ -3,6 +3,7 @@
 use super::*;
 
 pub(super) fn wire(ui: &Rc<Ui>) {
+    wire_tooltips(ui);
     ui.connect_button.click({
         let weak = Rc::downgrade(ui);
         move |_, _| {
@@ -394,6 +395,32 @@ pub(super) fn wire(ui: &Rc<Ui>) {
             }
         }
     });
+}
+
+/// Attaches the hover tooltip to every icon button created by `icons::icon_button`.
+fn wire_tooltips(ui: &Rc<Ui>) {
+    let mut tokens = Vec::new();
+    for (button, label) in icons::take_buttons() {
+        tokens.push(button.add_handler(InputElement::pointer_entered_event(), {
+            let weak = Rc::downgrade(ui);
+            let layer = ui.tip_layer.clone();
+            move |_, e| {
+                if let Some(ui) = weak.upgrade() {
+                    let at = e.get_position(Some(&layer));
+                    ui.show_tip(&label, at);
+                }
+            }
+        }));
+        tokens.push(button.add_handler(InputElement::pointer_exited_event(), {
+            let weak = Rc::downgrade(ui);
+            move |_, _| {
+                if let Some(ui) = weak.upgrade() {
+                    ui.hide_tip();
+                }
+            }
+        }));
+    }
+    ui.input_tokens.borrow_mut().extend(tokens);
 }
 
 pub(super) fn attach_control_input(ui: &Rc<Ui>) {

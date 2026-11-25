@@ -11,7 +11,8 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
   source/quality/remote-control row sit in a toolbar under the header, the files panel sits above
   the composer, and the update check moved into Settings → About.
 - User-visible product name is "Rust Chat" (window title, brand panel, sidebar, About).
-- Icon-only buttons are centred and carry a tooltip plus an automation name and help text.
+- Icon-only buttons are centred and carry an in-app hover tooltip plus an automation name and help
+  text.
 
 ### Fixed
 
@@ -23,9 +24,9 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 - Material Design Icons: a 4.7 KB subset is bundled in the executable and registered from memory; the
   action buttons are icon-only with automation names (settings, disconnect, mute, share, send,
   file accept/decline/open, remote control, update check).
-- Three-pane room shell: sidebar with rooms, members and navigation; header with the room state and
-  icon actions; message feed with name/time bubbles, own-message tint and scroll-to-end; right rail
-  with voice, files and sharing cards.
+- Room shell: sidebar with rooms, members and navigation; header with the room state and icon
+  actions; message feed with name/time bubbles, own-message tint and scroll-to-end; a toolbar for
+  voice and sharing, and the files panel above the composer.
 - Settings screen (M7): connection (auto-connect, forget pinned key), chat (timestamps, 24-hour
   clock, keep history, clear local history), audio devices, default share quality, received-files
   folder with "open when finished", and an About section. Every change is persisted immediately;

@@ -557,6 +557,28 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     room_view.children().add(&centre);
     room_view.set_is_visible(false);
 
+    // Hover hints: a hit-test invisible layer above every view.
+    let tip_label = ui_kit::body("", 11.5);
+    tip_label.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
+    let tip_bubble = Border::new();
+    tip_bubble.set_background(Some(ui_kit::brush(0xE61B_1B1B)));
+    tip_bubble.set_corner_radius(CornerRadius::uniform(6.0));
+    tip_bubble.set_padding(Thickness {
+        left: 8.0,
+        top: 4.0,
+        right: 8.0,
+        bottom: 4.0,
+    });
+    tip_bubble.set_child(&tip_label);
+    tip_bubble.set_is_visible(false);
+    Canvas::set_left(&tip_bubble, 0.0);
+    Canvas::set_top(&tip_bubble, 0.0);
+    let tip_layer = Canvas::new();
+    tip_layer.set_horizontal_alignment(HorizontalAlignment::Stretch);
+    tip_layer.set_vertical_alignment(VerticalAlignment::Stretch);
+    tip_layer.set_is_hit_test_visible(false);
+    tip_layer.children().add(&tip_bubble);
+
     let root = Grid::new();
     root.set_horizontal_alignment(HorizontalAlignment::Stretch);
     root.set_vertical_alignment(VerticalAlignment::Stretch);
@@ -564,6 +586,7 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     root.children().add(connect_view.clone());
     root.children().add(room_view.clone());
     root.children().add(settings_screen.view.clone());
+    root.children().add(&tip_layer);
 
     let file_prefs = FilePrefs::new(
         settings.downloads_dir.as_ref().map(PathBuf::from),
@@ -579,6 +602,9 @@ pub(crate) fn create_main_window() -> Ref<Window> {
         room_view: room_view.clone(),
         stage_frame: stage_frame.clone(),
         file_card: file_card.clone(),
+        tip_layer,
+        tip_bubble,
+        tip_label,
         server_line: server_line.clone(),
         settings_nav: settings_nav_button.clone(),
         disconnect_nav: disconnect_nav_button.clone(),
