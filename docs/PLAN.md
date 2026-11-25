@@ -201,6 +201,11 @@ Every row must exist or be explicitly dropped.
 Total ~18–22 weeks full-time; realistically 6–9 months part-time. M3/M5 and M9 (Android, moved to
 the end by request) are where it can slip.
 
+**Where we are:** M0–M6 are complete and shipped (v0.1.0–v0.1.2). **M8 is mostly done early** —
+tagged releases with the Windows client reused from `main`, in-app update check, Ubuntu install /
+self-update / coturn / rollback (v0.1.5, static server binary). **M7 desktop polish is next**;
+Windows installer, Authenticode signing and auto-download remain under M8; M9 Android is last.
+
 ---
 
 ## 9. Testing and CI
@@ -473,11 +478,12 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 ### M8 — releases and updates
 
 - **Landed:** GitHub Actions release workflow for tagged Windows/Linux builds with SHA-256 sums,
-  CHANGELOG/releasing docs, in-app GitHub release check with “Open release”, and startup toggle.
-- **Ubuntu VPS (phase 1 landed, unreleased):** `scripts/install-server.sh`, split
-  `/etc/rust-chat` + `/var/lib/rust-chat` layout, hardened systemd unit, `rust-chat-server update`
-  with checksum verification, atomic replacement, health check and rollback, opt-in-by-prompt
-  daily updates, and coturn setup with TURN credentials. x86_64 only; no APT repository. See
+  CHANGELOG/releasing docs, in-app GitHub release check with “Open release”, startup toggle, and
+  descriptive asset names (`rust-chat-desktop-…`, `rust-chat-server-…`).
+- **Ubuntu VPS (released in v0.1.5):** `scripts/install-server.sh`, split `/etc/rust-chat` +
+  `/var/lib/rust-chat` layout, hardened systemd unit, `rust-chat-server update` with release-digest
+  and checksum verification, atomic replacement, health check and rollback, daily updates by prompt,
+  and coturn setup with TURN credentials. x86_64 static (musl) binary; no APT repository. See
   [SERVER_DEPLOY.md](SERVER_DEPLOY.md).
 - Still to do: Windows installer (MSI or Inno Setup) alongside the portable zip, Authenticode
   signing (optional), automatic download of the new build, and update notes in the UI.
@@ -486,5 +492,3 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 
 - `cdylib` built with `cargo ndk`, FerroUI Android shell, AAudio, receive-only VP8, files via SAF,
   foreground service and IME; tested on the TECNO device.
-- Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
-  device pickers, TURN, and the 4-peer measurement.
