@@ -3,6 +3,17 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [0.1.1] — 2026-11-25
+
+### Changed
+
+- Windows releases now ship only the desktop client; `rust-chat-server.exe` is a development tool
+  and is no longer packaged. The Linux server tarball is unchanged.
+- Faster release builds: the `release` profile disables LTO and uses 16 codegen units, and CI and
+  release jobs use `sccache` with the GitHub Actions cache. `--profile dist` still produces the
+  thin-LTO binary for local use.
+- Windows release packaging includes only the client, README and SHA-256 sums.
+
 ## [0.1.0] — 2026-11-25
 
 First public build of the Rust rewrite. Feature parity with the Kotlin desktop client except

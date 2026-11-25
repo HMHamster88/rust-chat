@@ -17,11 +17,12 @@ coturn, unchanged.
 ## Download
 
 - **Windows (portable):** [rust-chat-v0.1.0-windows-x64.zip](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-windows-x64.zip)
-  — `rust-chat.exe`, `rust-chat-server.exe`, README and SHA-256 sums.
+  — `rust-chat.exe`, README and SHA-256 sums.
 - **Linux server:** [rust-chat-v0.1.0-linux-x86_64.tar.gz](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.0/rust-chat-v0.1.0-linux-x86_64.tar.gz)
 
-Binaries are unsigned, so Windows SmartScreen may warn. The app checks this same release feed from
-its update row and can open the release page.
+The Windows server is a development tool and is not part of the Windows release. Binaries are
+unsigned, so Windows SmartScreen may warn. The app checks this same release feed from its update
+row and can open the release page.
 
 ## Status
 
@@ -60,12 +61,13 @@ cargo test --workspace
 Release builds:
 
 ```powershell
-cargo build --release -p rust-chat-desktop -p rust-chat-server
+cargo build --release -p rust-chat-desktop
 ```
 
-Tagged pushes (`vX.Y.Z`) build and attach the Windows client/server zip and the Linux server
-tarball to a GitHub Release; the client's **Check for updates** button reads the latest release
-from `HMHamster88/rust-chat`.
+The `release` profile is tuned for build speed (no LTO, 16 codegen units); `--profile dist` enables
+thin LTO when you want the smallest binary. Tagged pushes (`vX.Y.Z`) build and attach the Windows
+client zip and the Linux server tarball to a GitHub Release; the client's **Check for updates**
+button reads the latest release from `HMHamster88/rust-chat`.
 
 Server first run:
 

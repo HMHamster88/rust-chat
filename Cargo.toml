@@ -16,7 +16,7 @@ members = [
 exclude = ["spikes"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.89"
 publish = false
@@ -40,11 +40,12 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [profile.release]
-lto = "thin"
-codegen-units = 4
+# Fast release builds: no LTO and the default codegen parallelism.
+lto = false
+codegen-units = 16
 strip = "symbols"
 
 [profile.dist]
 inherits = "release"
-lto = "fat"
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
