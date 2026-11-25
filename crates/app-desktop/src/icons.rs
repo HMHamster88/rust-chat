@@ -166,6 +166,15 @@ pub fn take_buttons() -> Vec<(Ref<Button>, String)> {
     BUTTONS.with(|buttons| std::mem::take(&mut *buttons.borrow_mut()))
 }
 
+/// Replaces a button's content with a centred glyph, keeping an icon-only button icon-only when
+/// its state changes.
+pub fn set_icon(button: &Button, glyph: Icon) {
+    let content = icon(glyph, 16.0);
+    content.set_horizontal_alignment(ferroui_base::layout::HorizontalAlignment::Center);
+    content.set_vertical_alignment(ferroui_base::layout::VerticalAlignment::Center);
+    button.set_content(Some(Rc::new(content) as ferroui_base::BoxedValue));
+}
+
 /// A button face with the glyph and a text label, for actions that stay readable.
 pub fn icon_label(glyph: Icon, label: &str) -> Ref<StackPanel> {
     let row = StackPanel::new();

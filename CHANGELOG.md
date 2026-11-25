@@ -16,6 +16,8 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 ### Fixed
 
+- Toggle buttons (mute microphone, mute speakers, share) keep their icon when pressed; they swap
+  between the on/off glyphs instead of replacing the icon with a text label.
 - Leaving voice no longer leaves the app burning CPU: the screen-share task kept polling a closed
   command channel after the voice session ended, spinning a worker thread (~17% CPU measured).
 - The Display name and Password fields line up with their labels instead of being centred in the

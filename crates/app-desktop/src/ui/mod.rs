@@ -433,11 +433,14 @@ impl Ui {
         } else {
             "microphone live".to_owned()
         });
-        self.mute_mic.set_content(Some(Rc::new(if muted {
-            "Unmute mic".to_owned()
-        } else {
-            "Mute mic".to_owned()
-        })));
+        icons::set_icon(
+            &self.mute_mic,
+            if muted {
+                icons::Icon::MicrophoneOff
+            } else {
+                icons::Icon::Microphone
+            },
+        );
     }
 
     fn toggle_speaker(&self) {
@@ -456,11 +459,14 @@ impl Ui {
         } else {
             "speakers live".to_owned()
         });
-        self.mute_speaker.set_content(Some(Rc::new(if muted {
-            "Unmute speakers".to_owned()
-        } else {
-            "Mute speakers".to_owned()
-        })));
+        icons::set_icon(
+            &self.mute_speaker,
+            if muted {
+                icons::Icon::SpeakerOff
+            } else {
+                icons::Icon::Speaker
+            },
+        );
     }
 
     fn toggle_share(&self) {
@@ -479,11 +485,7 @@ impl Ui {
         } else {
             "screen sharing stopped".to_owned()
         });
-        self.share.set_content(Some(Rc::new(if sharing {
-            "Stop sharing".to_owned()
-        } else {
-            "Share screen".to_owned()
-        })));
+        icons::set_icon(&self.share, icons::Icon::ShareScreen);
         if !sharing {
             self.show_video(false);
         }
