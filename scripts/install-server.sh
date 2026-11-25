@@ -132,13 +132,19 @@ id -u rust-chat >/dev/null 2>&1 || \
 install -d -m 0750 -o root -g rust-chat "$CONFIG_DIR" "$CONFIG_DIR/tls"
 install -d -m 0750 -o rust-chat -g rust-chat "$DATA_DIR"
 
-if systemctl is-active --quiet "$SERVICE" 2>/dev/null; then
-    log "stopping the running service"
-    systemctl stop "$SERVICE"
-fi
-
 log "installing the binary"
-install -m 0755 "$TMP/rust-chat-server" "$BIN"
+if [[ -f "$BIN" ]]; then
+    cp -p "$BIN" "$BIN.previous"
+fi
+install -m 0755 "$TMP/rust-chat-server" "$BIN.new"
+if ! BIN_VERSION_OUTPUT="$("$BIN.new" --version 2>&1)"; then
+    rm -f "$BIN.new"
+    warn "the downloaded binary does not run on this system:"
+    printf '%s\n' "$BIN_VERSION_OUTPUT" >&2
+    die "nothing was replaced and the running server was left untouched. This release probably needs a newer glibc."
+fi
+mv -f "$BIN.new" "$BIN"
+log "installed $BIN_VERSION_OUTPUT"
 
 if [[ "$NEW_INSTALL" == "1" ]]; then
     log "writing the first configuration"

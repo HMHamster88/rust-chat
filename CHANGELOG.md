@@ -5,12 +5,25 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 ## [Unreleased]
 
+### Changed
+
+- The Linux server is built as a fully static x86_64 binary (musl), so the release no longer
+  depends on the host glibc and runs on older VPS images. 0.1.4 required glibc 2.32+ because it was
+  linked on the Ubuntu 24.04 runner (`GLIBC_2.32' not found` on Ubuntu 20.04/Debian 11).
+- The installer checks the downloaded binary with `--version` before replacing the installed one and
+  keeps `rust-chat-server.previous`, so a failing binary leaves the old server untouched.
+
 ### Fixed
 
 - `scripts/install-server.sh`: the `RUST_CHAT_VERSION` override was stored in `VERSION`, which
   `/etc/os-release` overwrites, so the one-liner could not resolve a release tag. The script keeps
   its own `RELEASE` variable now. The one-liner reads the script from `main`, so this is fixed
   without a release; `RUST_CHAT_VERSION=v0.1.4` works too.
+
+### Notes
+
+- A static server binary is validated in CI (`file`/`ldd` and `--version`) so a glibc-linked
+  regression cannot reach a release again.
 
 ## [0.1.4] — 2026-11-25
 

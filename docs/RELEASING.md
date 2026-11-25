@@ -30,6 +30,8 @@ artifacts to a GitHub Release. The in-app updater reads
 
 ## Notes
 
-- The desktop app is Windows-only; the server is cross-platform.
+- The desktop app is Windows-only; the server is cross-platform and ships as a static
+  `x86_64-unknown-linux-musl` binary, so it does not depend on the host glibc. Never replace it with
+  a natively linked build: 0.1.4 did and failed on older VPS images with `GLIBC_2.32 not found`.
 - Artifacts are unsigned (no Authenticode certificate yet). SmartScreen may warn.
 - No license has been chosen for the product crates yet; decide before distributing widely.

@@ -22,7 +22,7 @@ Pick the asset that matches what you want to run — every release contains exac
 | Asset | What it is |
 |---|---|
 | `rust-chat-desktop-vX.Y.Z-windows-x64.zip` | Windows desktop client (`rust-chat.exe`, portable) |
-| `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`) |
+| `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`, static binary) |
 
 - **Latest release:** https://github.com/HMHamster88/rust-chat/releases/latest
 - **Linux server install:** see [Server on a VPS](#server-on-a-vps) below (one command).

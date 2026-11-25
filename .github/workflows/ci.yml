@@ -54,6 +54,21 @@ jobs:
       - name: Test
         run: cargo test -p rust-chat-protocol -p rust-chat-crypto -p rust-chat-server -p rust-chat-client-core
 
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build the static release binary
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --locked -p rust-chat-server --target x86_64-unknown-linux-musl
+
+      - name: Check the static binary has no glibc dependency
+        run: |
+          bin=target/x86_64-unknown-linux-musl/debug/rust-chat-server
+          file "$bin"
+          ! ldd "$bin" 2>&1 | grep -q libc.so
+          "$bin" --version
+
   audit:
     name: Audit
     runs-on: ubuntu-latest

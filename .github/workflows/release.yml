@@ -94,13 +94,18 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Build server
-        run: cargo build --release --locked -p rust-chat-server
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build server (static)
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --locked -p rust-chat-server --target x86_64-unknown-linux-musl
 
       - name: Package
         run: |
           mkdir -p dist
-          cp target/release/rust-chat-server dist/
+          cp target/x86_64-unknown-linux-musl/release/rust-chat-server dist/
           cp README.md dist/
           cd dist
           sha256sum rust-chat-server > SHA256SUMS.txt
@@ -116,7 +121,7 @@ jobs:
             | File | Contents |
             |---|---|
             | `rust-chat-desktop-*-windows-x64.zip` | Windows desktop client (`rust-chat.exe`, portable) |
-            | `rust-chat-server-*-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`) |
+            | `rust-chat-server-*-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`, static binary — no glibc requirement) |
 
             Install the server on Ubuntu/Debian with
             `curl -fsSL https://raw.githubusercontent.com/HMHamster88/rust-chat/main/scripts/install-server.sh | sudo bash`.

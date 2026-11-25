@@ -1,11 +1,13 @@
 # Server deployment on Ubuntu (VPS)
 
-Status: **released in v0.1.4** (installer, `update`, systemd, coturn). Verified end-to-end on an
-Ubuntu VM with systemd (fresh install, coturn, timer, rollback); a real VPS run is still worthwhile.
+Status: **release pipeline fixed after v0.1.4** (the 0.1.4 tarball was glibc-linked on the CI
+runner and failed on older VPS images; the server is now a static musl binary). Installer,
+`update`, systemd, coturn and rollback verified end-to-end on an Ubuntu VM with systemd.
 
 Decisions:
 
-- **x86_64 only** for now.
+- **x86_64 only** for now, shipped as a **static (musl) binary** — no glibc version requirement, so
+  Ubuntu 20.04, Debian 11 and similar images work.
 - **Automatic updates are on by default**, and the installer asks (default yes).
 - **No APT repository.** The installer plus `rust-chat-server update` is the supported path.
 - **coturn setup is included** and enabled by default with a prompt.
@@ -27,7 +29,8 @@ The installer:
    `sha256:` digest that GitHub reports for the release asset, then verifies the
    `rust-chat-server` SHA-256 from `SHA256SUMS.txt` inside it;
 3. creates the `rust-chat` system user, `/etc/rust-chat` and `/var/lib/rust-chat`;
-4. installs `/usr/local/bin/rust-chat-server` and runs `init --dir /etc/rust-chat
+4. installs `/usr/local/bin/rust-chat-server` (after checking the new binary runs; the previous one
+   is kept as `rust-chat-server.previous`) and runs `init --dir /etc/rust-chat
    --data-dir /var/lib/rust-chat` (asks for the password unless `RUST_CHAT_PASSWORD` is set);
 5. writes and starts the hardened `rust-chat-server.service`;
 6. asks whether to install coturn (default yes) and configures TURN credentials in both coturn and
