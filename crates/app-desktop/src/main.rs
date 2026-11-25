@@ -1203,7 +1203,6 @@ struct SettingsScreen {
     nav: Vec<Ref<Button>>,
     sections: Vec<Ref<StackPanel>>,
     section: Cell<usize>,
-    title: Ref<TextBlock>,
     danger_bar: Ref<Border>,
     open_room: Ref<Button>,
     open_connect: Ref<Button>,
@@ -1239,20 +1238,6 @@ fn small_button(label: &str) -> Ref<Button> {
     let button = Button::new();
     button.set_content(Some(Rc::new(label.to_owned())));
     button
-}
-
-fn checkbox(label: &str, checked: bool) -> Ref<CheckBox> {
-    let box_ = CheckBox::new();
-    box_.set_content(Some(Rc::new(label.to_owned())));
-    box_.set_is_checked(Some(checked));
-    box_
-}
-
-fn section(panel: &Ref<StackPanel>, glyph: icons::Icon, title: &str) {
-    let row = ui_kit::row(7.0);
-    row.children().add(icons::icon(glyph, 14.0));
-    row.children().add(ui_kit::section_label(title));
-    panel.children().add(row);
 }
 
 fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
@@ -1460,9 +1445,9 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     scroller.set_content(Some(Control::boxed(&body_frame)));
 
     // --- header, nav, footer ---
-    let title = ui_kit::headline("Settings");
+    let heading = ui_kit::headline("Settings");
     let header = ui_kit::row(8.0);
-    header.children().add(&title);
+    header.children().add(&heading);
     let header_frame = Border::new();
     header_frame.set_background(Some(ui_kit::brush(ui_kit::CARD)));
     header_frame.set_padding(Thickness {
@@ -1553,7 +1538,6 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
         nav,
         sections,
         section: Cell::new(0),
-        title,
         danger_bar: danger_bar.clone(),
         open_room,
         open_connect,
