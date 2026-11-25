@@ -3,6 +3,15 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [Unreleased]
+
+### Added
+
+- Server self-update (`rust-chat-server update`, `--check`, `--rollback`) and an Ubuntu installer
+  (`scripts/install-server.sh`) with systemd, optional daily updates and coturn setup.
+- `init --dir <dir> --data-dir <dir>` for the `/etc/rust-chat` + `/var/lib/rust-chat` layout, and
+  `--password-file` for unattended provisioning.
+
 ## [0.1.2] — 2026-11-25
 
 ### Changed

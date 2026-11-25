@@ -29,6 +29,15 @@ enum Command {
         /// Non-interactive password; otherwise prompts on the terminal.
         #[arg(long)]
         password: Option<String>,
+        /// Read the password from a file (first line); avoids process arguments.
+        #[arg(long, conflicts_with = "password")]
+        password_file: Option<PathBuf>,
+        /// Base directory for the verifier and TLS material (for an installed layout).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Directory for client-created rooms (defaults to the relative config path).
+        #[arg(long)]
+        data_dir: Option<PathBuf>,
     },
     /// Replace the shared password verifier.
     HashPassword {
@@ -41,6 +50,23 @@ enum Command {
     Fingerprint {
         #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
         config: PathBuf,
+    },
+    /// Update the server from the latest GitHub release (Linux).
+    Update {
+        #[arg(long, default_value = DEFAULT_CONFIG_PATH)]
+        config: PathBuf,
+        /// Only report the current and latest versions.
+        #[arg(long)]
+        check: bool,
+        /// Do not ask for confirmation (for timers).
+        #[arg(long)]
+        yes: bool,
+        /// Restore rust-chat-server.previous.
+        #[arg(long)]
+        rollback: bool,
+        /// Install a specific tag instead of the latest release.
+        #[arg(long)]
+        release: Option<String>,
     },
     /// Run the WebSocket control plane.
     Serve {
@@ -62,19 +88,56 @@ async fn main() -> anyhow::Result<()> {
     match cli.command.unwrap_or(Command::Serve {
         config: PathBuf::from(DEFAULT_CONFIG_PATH),
     }) {
-        Command::Init { config, password } => init(&config, password),
+        Command::Init {
+            config,
+            password,
+            password_file,
+            dir,
+            data_dir,
+        } => init(&config, password, password_file, dir, data_dir),
         Command::HashPassword { config, password } => hash_password(&config, password),
         Command::Fingerprint { config } => print_fingerprint(&config),
+        Command::Update {
+            config,
+            check,
+            yes,
+            rollback,
+            release,
+        } => update_command(&config, check, yes, rollback, release),
         Command::Serve { config } => serve(&config).await,
     }
 }
 
-fn init(config_path: &Path, password: Option<String>) -> anyhow::Result<()> {
+fn init(
+    config_path: &Path,
+    password: Option<String>,
+    password_file: Option<PathBuf>,
+    dir: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let config = if config_path.exists() {
         println!("kept existing {}", config_path.display());
         ServerConfig::load(config_path)?
     } else {
-        let config = ServerConfig::default();
+        let mut config = ServerConfig::default();
+        if let Some(dir) = &dir {
+            std::fs::create_dir_all(dir)?;
+            config.verifier_file = dir.join("verifier").to_string_lossy().into_owned();
+            config.tls.cert_file = dir
+                .join("tls")
+                .join("cert.pem")
+                .to_string_lossy()
+                .into_owned();
+            config.tls.key_file = dir
+                .join("tls")
+                .join("key.pem")
+                .to_string_lossy()
+                .into_owned();
+        }
+        if let Some(data_dir) = &data_dir {
+            std::fs::create_dir_all(data_dir)?;
+            config.client_rooms_file = data_dir.join("rooms.json").to_string_lossy().into_owned();
+        }
         config.save(config_path)?;
         println!("wrote {}", config_path.display());
         config
@@ -84,7 +147,18 @@ fn init(config_path: &Path, password: Option<String>) -> anyhow::Result<()> {
     if verifier_path.exists() {
         println!("kept existing {}", verifier_path.display());
     } else {
-        let password = prompt_password(password, "Server password: ")?;
+        if let Some(parent) = verifier_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let password = match password_file {
+            Some(path) => std::fs::read_to_string(&path)
+                .with_context(|| format!("cannot read {}", path.display()))?
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned(),
+            None => prompt_password(password, "Server password: ")?,
+        };
         let verifier = PasswordVerifier::with_defaults(&password)?;
         save_verifier(verifier_path, &verifier)?;
         println!("wrote {}", verifier_path.display());
@@ -121,6 +195,62 @@ fn hash_password(config_path: &Path, password: Option<String>) -> anyhow::Result
 fn print_fingerprint(config_path: &Path) -> anyhow::Result<()> {
     let config = ServerConfig::load(config_path)?;
     println!("{}", read_fingerprint(&config.tls)?);
+    Ok(())
+}
+
+fn update_command(
+    config_path: &Path,
+    check: bool,
+    yes: bool,
+    rollback: bool,
+    release: Option<String>,
+) -> anyhow::Result<()> {
+    let config = ServerConfig::load(config_path).unwrap_or_default();
+    if rollback {
+        let exe = rust_chat_server::update::rollback()?;
+        println!("rolled back {}", exe.display());
+        rust_chat_server::update::restart_and_wait(config.port)?;
+        println!("server restarted on port {}", config.port);
+        return Ok(());
+    }
+
+    let tag = release.map(|tag| {
+        if tag.starts_with('v') {
+            tag
+        } else {
+            format!("v{tag}")
+        }
+    });
+    let release = rust_chat_server::update::release(tag.as_deref())?;
+    let current = env!("CARGO_PKG_VERSION");
+    if !rust_chat_server::update::is_newer(&release.version, current) {
+        println!(
+            "rust-chat-server {current} is up to date (latest {})",
+            release.version
+        );
+        return Ok(());
+    }
+    if check {
+        println!(
+            "current {current}; latest {} at {}",
+            release.version, release.html_url
+        );
+        return Ok(());
+    }
+    if !yes
+        && !rust_chat_server::update::confirm(&format!(
+            "Update rust-chat-server from {current} to {}?",
+            release.version
+        ))?
+    {
+        println!("cancelled");
+        return Ok(());
+    }
+
+    let exe = rust_chat_server::update::install(&release)?;
+    println!("installed {} at {}", release.version, exe.display());
+    rust_chat_server::update::restart_and_wait(config.port)?;
+    println!("server restarted and listening on port {}", config.port);
     Ok(())
 }
 

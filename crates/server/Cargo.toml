@@ -16,6 +16,7 @@ axum-server = { version = "0.9.2", default-features = false, features = ["tls-ru
 base64 = { workspace = true }
 clap = { workspace = true }
 futures-util = "0.3.34"
+flate2 = "1.1.5"
 hmac = { workspace = true }
 rand = "0.10.4"
 rcgen = { workspace = true }
@@ -26,11 +27,13 @@ rustls-pemfile = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha1 = "0.11.0"
+tar = "0.4.44"
 thiserror = { workspace = true }
 tokio = { version = "1.54.1", features = ["full"] }
 toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+ureq = { version = "3.5.2", default-features = false, features = ["rustls", "json"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.30.0"

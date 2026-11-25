@@ -6,6 +6,7 @@ pub mod rooms;
 pub mod server;
 pub mod state;
 pub mod turn;
+pub mod update;
 
 pub use config::{RoomConfig, ServerConfig, TlsConfig, TurnConfig};
 pub use state::Shared;

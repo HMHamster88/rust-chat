@@ -474,13 +474,13 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
 
 - **Landed:** GitHub Actions release workflow for tagged Windows/Linux builds with SHA-256 sums,
   CHANGELOG/releasing docs, in-app GitHub release check with “Open release”, and startup toggle.
+- **Ubuntu VPS (phase 1 landed, unreleased):** `scripts/install-server.sh`, split
+  `/etc/rust-chat` + `/var/lib/rust-chat` layout, hardened systemd unit, `rust-chat-server update`
+  with checksum verification, atomic replacement, health check and rollback, opt-in-by-prompt
+  daily updates, and coturn setup with TURN credentials. x86_64 only; no APT repository. See
+  [SERVER_DEPLOY.md](SERVER_DEPLOY.md).
 - Still to do: Windows installer (MSI or Inno Setup) alongside the portable zip, Authenticode
   signing (optional), automatic download of the new build, and update notes in the UI.
-- **Ubuntu VPS (planned):** one-line installer (`scripts/install-server.sh`), a split
-  `/etc/rust-chat` + `/var/lib/rust-chat` layout, a hardened systemd unit, `rust-chat-server
-  update` with checksum verification, atomic replacement, health check and rollback, plus an
-  opt-in update timer. Phase 2 is a signed APT repository; Docker is optional. See
-  [SERVER_DEPLOY.md](SERVER_DEPLOY.md).
 
 ### M9 — Android (last)
 

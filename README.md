@@ -82,6 +82,19 @@ cargo run -p rust-chat-server -- fingerprint
 existing verifier can be reused) and an ECDSA P-256 certificate under `config/tls/`. Clients pin
 the printed SHA-256 fingerprint on first connect.
 
+## Server on a VPS
+
+Ubuntu 22.04/24.04, x86_64:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HMHamster88/rust-chat/main/scripts/install-server.sh | sudo bash
+sudo rust-chat-server update            # later updates; --check and --rollback also exist
+```
+
+The installer sets up the systemd service, the `/etc/rust-chat` + `/var/lib/rust-chat` layout,
+optional coturn and daily updates. Details, firewall ports and manual steps:
+[docs/SERVER_DEPLOY.md](docs/SERVER_DEPLOY.md).
+
 ## License
 
 Not chosen yet. `spikes/ferroui` is subject to FerroUI's MIT license; the product crates are
