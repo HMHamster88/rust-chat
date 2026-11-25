@@ -3,7 +3,7 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.3] — 2026-11-25
 
 ### Added
 
@@ -11,6 +11,13 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
   (`scripts/install-server.sh`) with systemd, optional daily updates and coturn setup.
 - `init --dir <dir> --data-dir <dir>` for the `/etc/rust-chat` + `/var/lib/rust-chat` layout, and
   `--password-file` for unattended provisioning.
+
+### Notes
+
+- The installer targets Ubuntu/Debian on x86_64; there is no APT repository and no ARM64 build.
+- Automatic server updates are offered by the installer and default to enabled; coturn is offered
+  and defaults to enabled.
+- The Windows release remains the client only; the Linux release carries the server.
 
 ## [0.1.2] — 2026-11-25
 
