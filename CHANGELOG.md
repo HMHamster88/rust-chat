@@ -3,54 +3,43 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.6] — 2026-11-25
+
+### Added
+
+- Material Design Icons: a 4.9 KB subset is bundled in the executable and registered from memory;
+  the action buttons are icon-only, centred, with hover tooltips and automation names (settings,
+  disconnect, mute, share, phone join/leave, send, file accept/decline/open, remote control,
+  update check).
+- Room shell: sidebar with rooms and members; header with the room state and icon actions; message
+  feed with name/time bubbles, own-message tint and scroll-to-end; a toolbar for voice and sharing,
+  and the files panel above the composer.
+- Settings screen (M7): sidebar navigation, section cards for connection, chat, audio & video, files
+  and about; every change is persisted immediately and destructive actions need a confirmation.
+- Branded connect screen: product panel plus a centred connection card.
+- The desktop window is sized and centred in the work area, and the settings panel scrolls, so
+  nothing is cut off on screens shorter than 920 px.
 
 ### Changed
 
 - Joining a voice call starts with the microphone live instead of muted (the button and the
   presence other members see follow the same state).
-- The room has no right-hand rail any more: voice mute controls and the sharing
-  source/quality/remote-control row sit in a toolbar under the header, the files panel sits above
-  the composer, and the update check moved into Settings → About.
+- The room has no right-hand rail any more: mute controls, sharing and the files panel sit in the
+  main column, and the update check moved into Settings → About.
 - User-visible product name is "Rust Chat" (window title, brand panel, sidebar, About).
-- Icon-only buttons are centred and carry an in-app hover tooltip plus an automation name and help
-  text.
-
-### Fixed
-
-- Toggle buttons (mute microphone, mute speakers, share) keep their icon when pressed; they swap
-  between the on/off glyphs instead of replacing the icon with a text label.
-- Leaving voice no longer leaves the app burning CPU: the screen-share task kept polling a closed
-  command channel after the voice session ended, spinning a worker thread (~17% CPU measured).
-- The Display name and Password fields line up with their labels instead of being centred in the
-  connect card.
-
-### Added
-
-- Material Design Icons: a 4.7 KB subset is bundled in the executable and registered from memory; the
-  action buttons are icon-only with automation names (settings, disconnect, mute, share, send,
-  file accept/decline/open, remote control, update check).
-- Room shell: sidebar with rooms, members and navigation; header with the room state and icon
-  actions; message feed with name/time bubbles, own-message tint and scroll-to-end; a toolbar for
-  voice and sharing, and the files panel above the composer.
-- Settings screen (M7): connection (auto-connect, forget pinned key), chat (timestamps, 24-hour
-  clock, keep history, clear local history), audio devices, default share quality, received-files
-  folder with "open when finished", and an About section. Every change is persisted immediately;
-  destructive actions need a confirmation click. The window is sized/centred for the work area and
-  the panel scrolls.
-- Branded connect screen: product panel plus a centred connection card.
-- The desktop window is sized and centered in the work area, and the settings panel scrolls, so
-  nothing is cut off on screens shorter than 920 px.
-
-### Changed
-
 - `ClientSettings` gained `showTimestamps`, `clock24h`, `downloadsDir`, `openWhenFinished`,
   `micDevice` and `speakerDevice`; older settings files keep working.
 - Chat rows show a local timestamp by default.
 
 ### Fixed
 
-- The connect panel now saves host, port, TLS and display name when the window closes (and when
+- Leaving voice no longer leaves the app burning CPU: the screen-share task kept polling a closed
+  command channel after the voice session ended, spinning a worker thread (~17% CPU measured).
+- Toggle buttons (mute microphone, mute speakers, share) keep their icon when pressed; they swap
+  between the on/off glyphs instead of replacing the icon with a text label.
+- The Display name and Password fields line up with their labels instead of being centred in the
+  connect card.
+- The connect panel saves host, port, TLS and display name when the window closes (and when
   "Remember password" is toggled) instead of only on **Connect**, so typed settings survive a
   restart even if the user never connected.
 
