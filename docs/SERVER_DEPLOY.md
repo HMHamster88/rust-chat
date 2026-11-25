@@ -1,7 +1,7 @@
 # Server deployment on Ubuntu (VPS)
 
-Status: **phase 1 released in v0.1.3** (installer, `update`, systemd, coturn). The Ubuntu
-end-to-end acceptance still needs a real VPS run.
+Status: **released in v0.1.4** (installer, `update`, systemd, coturn). Verified end-to-end on an
+Ubuntu VM with systemd (fresh install, coturn, timer, rollback); a real VPS run is still worthwhile.
 
 Decisions:
 

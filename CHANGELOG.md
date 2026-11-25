@@ -3,7 +3,7 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.4] — 2026-11-25
 
 ### Changed
 
