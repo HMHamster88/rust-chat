@@ -7,7 +7,7 @@ use rust_chat_client_core::client::{ClientHandle, ConnectRequest};
 use rust_chat_client_core::settings::ClientSettings;
 use rust_chat_client_core::{ChatSnapshot, ConnectionState};
 use rust_chat_crypto::PasswordVerifier;
-use rust_chat_desktop::voice::{self, VoiceCommand, VoiceEvent};
+use rust_chat_desktop::voice::{self, ShareSettings, VoiceCommand, VoiceEvent};
 use rust_chat_media::audio::{FRAME_SAMPLES, sine};
 use rust_chat_media_desktop::audio::{AudioControl, AudioEvent, AudioHandle, Playout};
 use rust_chat_server::config::{RoomConfig, ServerConfig};
@@ -138,6 +138,7 @@ async fn two_clients_exchange_opus_through_the_server() {
         alice_audio.handle,
         &tokio::runtime::Handle::current(),
         None,
+        ShareSettings::default(),
     );
     let mut bob_voice = voice::start(
         bob.clone(),
@@ -145,6 +146,7 @@ async fn two_clients_exchange_opus_through_the_server() {
         bob_audio.handle,
         &tokio::runtime::Handle::current(),
         None,
+        ShareSettings::default(),
     );
 
     // Announce voice and wait until both authoritative member lists see it.
@@ -278,6 +280,7 @@ async fn four_clients_mesh_audio_and_survive_a_leave() {
             handle,
             &tokio::runtime::Handle::current(),
             None,
+            ShareSettings::default(),
         );
         audios.push((frames, playout));
         _event_keepers.push(_events);

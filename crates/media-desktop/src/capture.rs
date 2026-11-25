@@ -85,44 +85,156 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 }
 
+/// What the user chose to share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureSource {
+    Monitor(usize),
+    Window(String),
+}
+
+impl CaptureSource {
+    pub fn id(&self) -> String {
+        match self {
+            Self::Monitor(index) => format!("monitor:{index}"),
+            Self::Window(title) => format!("window:{title}"),
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        if let Some(index) = id.strip_prefix("monitor:") {
+            return index.parse().ok().map(Self::Monitor);
+        }
+        id.strip_prefix("window:")
+            .map(|title| Self::Window(title.to_owned()))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourceInfo {
+    pub source: CaptureSource,
+    pub label: String,
+}
+
+pub fn enumerate_sources() -> Vec<SourceInfo> {
+    let mut sources = Vec::new();
+    if let Ok(monitors) = Monitor::enumerate() {
+        for (index, monitor) in monitors.iter().enumerate() {
+            let name = monitor.name().unwrap_or_default();
+            sources.push(SourceInfo {
+                source: CaptureSource::Monitor(index + 1),
+                label: if name.is_empty() {
+                    format!("Monitor {}", index + 1)
+                } else {
+                    format!("Monitor {} ({name})", index + 1)
+                },
+            });
+        }
+    }
+    if let Ok(windows) = windows_capture::window::Window::enumerate() {
+        for window in windows {
+            let Ok(title) = window.title() else { continue };
+            if title.trim().is_empty() || title == "Program Manager" {
+                continue;
+            }
+            sources.push(SourceInfo {
+                source: CaptureSource::Window(title.clone()),
+                label: title,
+            });
+        }
+    }
+    sources
+}
+
+/// The screen rectangle a source occupies, used to map remote input.
+pub fn capture_rect(source: &CaptureSource) -> Result<crate::input::ScreenRect, String> {
+    match source {
+        CaptureSource::Monitor(index) => monitor_rect(*index),
+        CaptureSource::Window(title) => {
+            let window = windows_capture::window::Window::from_contains_name(title)
+                .map_err(|error| error.to_string())?;
+            let rect = window.rect().map_err(|error| error.to_string())?;
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            if width <= 0 || height <= 0 {
+                return Err("the window has no visible area".to_owned());
+            }
+            Ok(crate::input::ScreenRect {
+                x: rect.left,
+                y: rect.top,
+                width: width as u32,
+                height: height as u32,
+            })
+        }
+    }
+}
+
 pub struct ScreenCapture {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl ScreenCapture {
-    pub fn start_monitor(
-        index: usize,
+    pub fn start(
+        source: &CaptureSource,
         frames: mpsc::UnboundedSender<CapturedFrame>,
     ) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
-        let flags = CaptureFlags {
-            frames,
-            stop: stop.clone(),
-        };
+        let source = source.clone();
+        let source_for_thread = source.clone();
+        let thread_stop = stop.clone();
         let thread = std::thread::Builder::new()
             .name("rust-chat-screen-capture".to_owned())
             .spawn(move || {
-                let monitor = match Monitor::from_index(index) {
-                    Ok(monitor) => monitor,
-                    Err(error) => {
-                        eprintln!("screen capture: no monitor {index}: {error}");
-                        return;
+                let flags = CaptureFlags {
+                    frames,
+                    stop: thread_stop,
+                };
+                let result = match source_for_thread {
+                    CaptureSource::Monitor(index) => match Monitor::from_index(index) {
+                        Ok(monitor) => {
+                            let settings = Settings::new(
+                                monitor,
+                                CursorCaptureSettings::Default,
+                                DrawBorderSettings::Default,
+                                SecondaryWindowSettings::Default,
+                                MinimumUpdateIntervalSettings::Default,
+                                DirtyRegionSettings::Default,
+                                ColorFormat::Bgra8,
+                                flags,
+                            );
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                CaptureHandler::start(settings)
+                            }))
+                        }
+                        Err(error) => {
+                            eprintln!("screen capture: no monitor {index}: {error}");
+                            return;
+                        }
+                    },
+                    CaptureSource::Window(title) => {
+                        match windows_capture::window::Window::from_contains_name(&title) {
+                            Ok(window) => {
+                                let settings = Settings::new(
+                                    window,
+                                    CursorCaptureSettings::Default,
+                                    DrawBorderSettings::Default,
+                                    SecondaryWindowSettings::Default,
+                                    MinimumUpdateIntervalSettings::Default,
+                                    DirtyRegionSettings::Default,
+                                    ColorFormat::Bgra8,
+                                    flags,
+                                );
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    CaptureHandler::start(settings)
+                                }))
+                            }
+                            Err(error) => {
+                                eprintln!("screen capture: no window `{title}`: {error}");
+                                return;
+                            }
+                        }
                     }
                 };
-                let settings = Settings::new(
-                    monitor,
-                    CursorCaptureSettings::Default,
-                    DrawBorderSettings::Default,
-                    SecondaryWindowSettings::Default,
-                    MinimumUpdateIntervalSettings::Default,
-                    DirtyRegionSettings::Default,
-                    ColorFormat::Bgra8,
-                    flags,
-                );
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    CaptureHandler::start(settings)
-                }));
                 match result {
                     Ok(Ok(())) => eprintln!("screen capture: ended"),
                     Ok(Err(error)) => eprintln!("screen capture stopped: {error}"),
@@ -141,6 +253,13 @@ impl ScreenCapture {
             stop,
             thread: Some(thread),
         })
+    }
+
+    pub fn start_monitor(
+        index: usize,
+        frames: mpsc::UnboundedSender<CapturedFrame>,
+    ) -> Result<Self, String> {
+        Self::start(&CaptureSource::Monitor(index), frames)
     }
 
     pub fn stop(&mut self) {

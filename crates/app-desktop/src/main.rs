@@ -25,8 +25,9 @@ use rust_chat_client_core::{
 };
 use rust_chat_desktop::control::{DEFAULT_LEASE_SECS, InputEvent, RemoteButton, countdown};
 use rust_chat_desktop::video_surface::{VideoSurface, build_presenter};
-use rust_chat_desktop::voice::{self, VoiceCommand, VoiceController, VoiceEvent};
+use rust_chat_desktop::voice::{self, ShareSettings, VoiceCommand, VoiceController, VoiceEvent};
 use rust_chat_media_desktop::audio::AudioIo;
+use rust_chat_media_desktop::capture::{CaptureSource, SourceInfo, enumerate_sources};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -83,6 +84,23 @@ impl ApplicationImpl for App {
 const PRESENTER_WIDTH: f64 = 640.0;
 const PRESENTER_HEIGHT: f64 = 360.0;
 
+/// Width, height, fps and bitrate choices offered by the Share quality button.
+const SHARE_PRESETS: &[(u32, u32, u32, u32)] = &[
+    (1280, 720, 5, 1_000_000),
+    (1280, 720, 10, 1_500_000),
+    (1280, 720, 15, 2_000_000),
+    (1280, 720, 30, 3_000_000),
+    (1920, 1080, 5, 2_000_000),
+    (1920, 1080, 10, 3_000_000),
+    (1920, 1080, 15, 4_000_000),
+    (2560, 1440, 5, 3_500_000),
+    (2560, 1440, 10, 5_000_000),
+];
+
+fn preset_label(preset: (u32, u32, u32, u32)) -> String {
+    format!("{}x{}@{}", preset.0, preset.1, preset.2)
+}
+
 struct VoiceRuntime {
     audio: AudioIo,
     controller: VoiceController,
@@ -133,6 +151,11 @@ struct Ui {
     mute_mic: Ref<Button>,
     mute_speaker: Ref<Button>,
     share: Ref<Button>,
+    share_source: Ref<Button>,
+    share_quality: Ref<Button>,
+    share_sources: RefCell<Vec<SourceInfo>>,
+    share_source_index: Cell<usize>,
+    share_preset_index: Cell<usize>,
     request_control: Ref<Button>,
     stop_control: Ref<Button>,
     allow_control: Ref<Button>,
@@ -277,6 +300,7 @@ impl Ui {
             handle,
             &self.runtime,
             snapshot.turn.clone(),
+            self.share_settings(),
         );
         *self.voice.borrow_mut() = Some(VoiceRuntime {
             audio,
@@ -424,6 +448,62 @@ impl Ui {
     fn send_voice_command(&self, command: VoiceCommand) {
         if let Some(runtime) = self.voice.borrow().as_ref() {
             runtime.controller.send(command);
+        }
+    }
+
+    fn share_settings(&self) -> ShareSettings {
+        let preset = SHARE_PRESETS[self.share_preset_index.get() % SHARE_PRESETS.len()];
+        let source = self
+            .share_sources
+            .borrow()
+            .get(self.share_source_index.get())
+            .map(|info| info.source.clone())
+            .unwrap_or(CaptureSource::Monitor(1));
+        ShareSettings {
+            source,
+            max_width: preset.0,
+            max_height: preset.1,
+            fps: preset.2,
+            bitrate: preset.3,
+        }
+    }
+
+    fn cycle_share_source(&self) {
+        let count = self.share_sources.borrow().len();
+        if count == 0 {
+            return;
+        }
+        let index = (self.share_source_index.get() + 1) % count;
+        self.share_source_index.set(index);
+        if let Some(info) = self.share_sources.borrow().get(index) {
+            self.share_source
+                .set_content(Some(Rc::new(format!("Source: {}", info.label))));
+        }
+        self.persist_share();
+    }
+
+    fn cycle_share_quality(&self) {
+        let index = (self.share_preset_index.get() + 1) % SHARE_PRESETS.len();
+        self.share_preset_index.set(index);
+        self.share_quality.set_content(Some(Rc::new(format!(
+            "Quality: {}",
+            preset_label(SHARE_PRESETS[index])
+        ))));
+        self.persist_share();
+    }
+
+    fn persist_share(&self) {
+        let share = self.share_settings();
+        let mut settings = self.settings.borrow().clone();
+        settings.share_source = Some(share.source.id());
+        settings.share_width = share.max_width;
+        settings.share_height = share.max_height;
+        settings.share_fps = share.fps;
+        settings.share_bitrate = share.bitrate;
+        *self.settings.borrow_mut() = settings.clone();
+        let _ = self.memory.save_settings(&settings);
+        if self.voice.borrow().is_some() {
+            self.send_voice_command(VoiceCommand::ConfigureShare(share));
         }
     }
 
@@ -726,6 +806,36 @@ fn create_main_window() -> Ref<Window> {
     mute_speaker.set_content(Some(Rc::new("Mute speakers".to_string())));
     let share = Button::new();
     share.set_content(Some(Rc::new("Share screen".to_string())));
+    let share_sources = enumerate_sources();
+    let share_source_index = settings
+        .share_source
+        .as_deref()
+        .and_then(|id| share_sources.iter().position(|info| info.source.id() == id))
+        .unwrap_or(0);
+    let share_preset_index = SHARE_PRESETS
+        .iter()
+        .position(|preset| {
+            preset.0 == settings.share_width
+                && preset.1 == settings.share_height
+                && preset.2 == settings.share_fps
+        })
+        .unwrap_or(1);
+    let share_source = Button::new();
+    share_source.set_content(Some(Rc::new(format!(
+        "Source: {}",
+        share_sources
+            .get(share_source_index)
+            .map(|info| info.label.as_str())
+            .unwrap_or("Monitor 1")
+    ))));
+    let share_quality = Button::new();
+    share_quality.set_content(Some(Rc::new(format!(
+        "Quality: {}",
+        preset_label(SHARE_PRESETS[share_preset_index])
+    ))));
+    let share_row = row();
+    share_row.children().add(share_source.clone());
+    share_row.children().add(share_quality.clone());
     let request_control = Button::new();
     request_control.set_content(Some(Rc::new("Request control".to_string())));
     request_control.set_is_visible(false);
@@ -797,6 +907,7 @@ fn create_main_window() -> Ref<Window> {
     room_panel.children().add(room_header);
     room_panel.children().add(room_actions);
     room_panel.children().add(voice_row);
+    room_panel.children().add(share_row);
     room_panel.children().add(control_row);
     room_panel.children().add(text("ROOMS", 12.0));
     room_panel.children().add(rooms_panel.clone());
@@ -851,6 +962,11 @@ fn create_main_window() -> Ref<Window> {
         mute_mic,
         mute_speaker,
         share,
+        share_source,
+        share_quality,
+        share_sources: RefCell::new(share_sources),
+        share_source_index: Cell::new(share_source_index),
+        share_preset_index: Cell::new(share_preset_index),
         request_control,
         stop_control,
         allow_control,
@@ -1010,6 +1126,22 @@ fn wire(ui: &Rc<Ui>) {
         move |_, _| {
             if let Some(ui) = weak.upgrade() {
                 ui.toggle_share();
+            }
+        }
+    });
+    ui.share_source.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cycle_share_source();
+            }
+        }
+    });
+    ui.share_quality.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.cycle_share_quality();
             }
         }
     });
@@ -1393,6 +1525,8 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.mute_mic.set_is_visible(active);
     ui.mute_speaker.set_is_visible(active);
     ui.share.set_is_visible(active);
+    ui.share_source.set_is_visible(active);
+    ui.share_quality.set_is_visible(active);
 
     let presenting = room
         .members
@@ -1452,6 +1586,13 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
 }
 
 fn render_video(ui: &Rc<Ui>, presenting: bool) {
+    if !presenting {
+        if ui.last_video.borrow_mut().take().is_some() {
+            *ui.voice_note.borrow_mut() = Some("screen sharing stopped".to_owned());
+        }
+        ui.show_video(false);
+        return;
+    }
     let sink = ui
         .voice
         .borrow()
@@ -1482,7 +1623,6 @@ fn render_video(ui: &Rc<Ui>, presenting: bool) {
         .is_some_and(|at| at.elapsed() < Duration::from_millis(1500));
     ui.show_video(presenting && (fresh || recent));
 }
-
 fn speaking(levels: &HashMap<String, (f32, Instant)>, id: &str) -> bool {
     levels
         .get(id)

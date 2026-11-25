@@ -12,9 +12,8 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M5 remote control complete (control data channel, consent, 30-minute lease,
-  SendInput, Alt+F4 filter, release-all). Next: screen-share picker/resolution polish, then M6
-  files. M0–M4 results and the M5 details are in §11/§12.
+- **Status:** M5 complete (remote control, monitor/window picker, quality presets, repeated
+  start/stop). Next: M6 file transfer. M0–M4 results and the M5 details are in §11/§12.
 
 ---
 
@@ -424,7 +423,15 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   (the log showed `move 1920,1077`, `button Left true/false`, `key 0x41 true/false`).
 - Tests: data-channel round trip, control message schema, injector mapping, Alt+F4 filtering and
   release-all. 84 workspace tests; `clippy -D warnings` clean.
-- Remaining: monitor/window picker, resolution/fps settings, repeated start/stop soak, and a live
-  (non-dry-run) input check on a second machine.
+- **Share controls.** The Source button cycles every monitor and top-level window (Windows
+  Graphics Capture supports both); the Quality button cycles 720p at 5/10/15/30 fps, 1080p at
+  5/10/15, and 1440p at 5/10, with matching bitrates. Both choices persist in `settings.json` and
+  restart capture live when changed during a share. Input for remote control maps to the shared
+  source's rectangle, so a window share is controllable without touching the rest of the desktop.
+- Verified through the UI: share → stop → change quality → share again (frames resume); share a
+  window by title (frames arrive); both monitors enumerate. A console window was captured
+  successfully.
+- Remaining: 1080p/1440p at 30 fps is not offered (the pure-Rust encoder would miss the frame
+  budget), and a live non-dry-run input check still needs a second machine.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

@@ -25,6 +25,11 @@ pub struct ClientSettings {
     pub keep_history: bool,
     pub check_for_updates: bool,
     pub skipped_version: Option<String>,
+    pub share_source: Option<String>,
+    pub share_width: u32,
+    pub share_height: u32,
+    pub share_fps: u32,
+    pub share_bitrate: u32,
 }
 
 impl Default for ClientSettings {
@@ -42,6 +47,11 @@ impl Default for ClientSettings {
             keep_history: true,
             check_for_updates: true,
             skipped_version: None,
+            share_source: None,
+            share_width: 1280,
+            share_height: 720,
+            share_fps: 10,
+            share_bitrate: 1_500_000,
         }
     }
 }
@@ -181,6 +191,10 @@ impl ConnectionMemory {
             self.secret.clear()?;
         }
         Ok(())
+    }
+
+    pub fn save_settings(&self, settings: &ClientSettings) -> Result<(), String> {
+        self.store.save(settings).map_err(|error| error.to_string())
     }
 
     pub fn clear_saved_server(&self) -> Result<(), String> {

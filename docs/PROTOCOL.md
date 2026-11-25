@@ -333,8 +333,9 @@ The `control` data channel carries newline-free JSON objects with a `t` tag:
 | `heartbeat` | — | Viewer liveness, every 5 s. |
 | `input` | `{event}` | One mouse/key event. |
 
-`event` is `{kind:"mouse_move", x, y}` in 0..1 monitor coordinates, `{kind:"mouse_button",
-button, pressed}`, `{kind:"wheel", delta, horizontal?}`, or `{kind:"key", vk, pressed}`.
+`event` is `{kind:"mouse_move", x, y}` in 0..1 coordinates of the shared source (monitor or
+window), `{kind:"mouse_button", button, pressed}`, `{kind:"wheel", delta, horizontal?}`, or
+`{kind:"key", vk, pressed}`.
 
 - A request is accepted only while the host is sharing and no other grant is active.
 - Leases are clamped to 5–60 minutes (30 default); both ends enforce expiry, and the host also

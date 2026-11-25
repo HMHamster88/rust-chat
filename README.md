@@ -14,12 +14,13 @@ coturn, unchanged.
 
 ## Status
 
-**M5 remote control complete.** A viewer with the presenter pane can request control over the
-peer-to-peer `control` data channel; the host sees an Allow/Deny prompt and grants a 5–60 minute
-lease (30 default). Granted input is injected through `SendInput` with mouse, wheel and keyboard
-mapping, Alt+F4 filtered, heartbeat monitoring and release-all on end. Verified end to end: real
-pointer moves, a click and an `A` keypress crossed from the viewer to the host's shared monitor.
-Next is the remaining M5 polish (monitor/window picker, resolution/fps settings) and M6 files.
+**M5 complete — remote control and share controls.** A viewer with the presenter pane can request
+control over the peer-to-peer `control` data channel; the host sees an Allow/Deny prompt and grants
+a 5–60 minute lease (30 default). Granted input is injected through `SendInput` with mouse, wheel
+and keyboard mapping, Alt+F4 filtered, heartbeat monitoring and release-all on end. The sharer can
+pick any monitor or window and a quality preset (720p/1080p/1440p, 5/10/15 fps; 720p up to 30),
+persisted across runs. Repeated start/stop and window capture are verified. Next is **M6: file
+transfer**.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.
