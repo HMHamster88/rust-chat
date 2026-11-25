@@ -3,7 +3,7 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
-## [Unreleased]
+## [0.1.5] — 2026-11-25
 
 ### Changed
 
@@ -17,13 +17,14 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 - `scripts/install-server.sh`: the `RUST_CHAT_VERSION` override was stored in `VERSION`, which
   `/etc/os-release` overwrites, so the one-liner could not resolve a release tag. The script keeps
-  its own `RELEASE` variable now. The one-liner reads the script from `main`, so this is fixed
-  without a release; `RUST_CHAT_VERSION=v0.1.4` works too.
+  its own `RELEASE` variable now; `RUST_CHAT_VERSION=v0.1.5` works as well as `latest`.
 
 ### Notes
 
 - A static server binary is validated in CI (`file`/`ldd` and `--version`) so a glibc-linked
   regression cannot reach a release again.
+- Upgrading from 0.1.4 on an affected VPS needs one manual step: the 0.1.4 binary cannot start, so
+  remove `/usr/local/bin/rust-chat-server` and re-run the installer.
 
 ## [0.1.4] — 2026-11-25
 

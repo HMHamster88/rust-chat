@@ -1,8 +1,8 @@
 # Server deployment on Ubuntu (VPS)
 
-Status: **release pipeline fixed after v0.1.4** (the 0.1.4 tarball was glibc-linked on the CI
-runner and failed on older VPS images; the server is now a static musl binary). Installer,
-`update`, systemd, coturn and rollback verified end-to-end on an Ubuntu VM with systemd.
+Status: **released in v0.1.5** — installer, `update`, systemd, coturn and rollback, with the server
+shipped as a static musl binary (the 0.1.4 tarball was glibc-linked on the CI runner and failed on
+older VPS images). Verified end-to-end on an Ubuntu VM with systemd.
 
 Decisions:
 

@@ -3427,14 +3427,14 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-android"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "rust-chat-ui",
 ]
 
 [[package]]
 name = "rust-chat-client-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base64 0.23.1",
  "directories",
@@ -3459,7 +3459,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-crypto"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "argon2",
  "base64 0.23.1",
@@ -3473,7 +3473,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "directories",
  "ferroui-base",
@@ -3500,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-media"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3518,14 +3518,14 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-media-android"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "rust-chat-media",
 ]
 
 [[package]]
 name = "rust-chat-media-desktop"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "cpal",
  "rust-chat-media",
@@ -3538,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-protocol"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -3547,7 +3547,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-server"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "axum",
@@ -3578,7 +3578,7 @@ dependencies = [
 
 [[package]]
 name = "rust-chat-ui"
-version = "0.1.4"
+version = "0.1.5"
 
 [[package]]
 name = "rust_decimal"
@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.1.4"
+version = "0.1.5"
 
 [[package]]
 name = "yasna"
