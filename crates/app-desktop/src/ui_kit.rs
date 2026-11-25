@@ -67,35 +67,35 @@ pub fn divider() -> Ref<Border> {
 
 /// Text with the primary colour.
 pub fn body(label: &str, size: f64) -> Ref<TextBlock> {
-    let block = super::text(label, size);
+    let block = crate::ui::text(label, size);
     block.set_foreground(Some(brush(TEXT)));
     block
 }
 
 /// Secondary text, used for hints and metadata.
 pub fn muted(label: &str, size: f64) -> Ref<TextBlock> {
-    let block = super::text(label, size);
+    let block = crate::ui::text(label, size);
     block.set_foreground(Some(brush(MUTED)));
     block
 }
 
 /// All-caps section label above a card.
 pub fn section_label(label: &str) -> Ref<TextBlock> {
-    let block = super::text(label, 11.0);
+    let block = crate::ui::text(label, 11.0);
     block.set_foreground(Some(brush(MUTED)));
     block
 }
 
 /// A screen headline.
 pub fn headline(label: &str) -> Ref<TextBlock> {
-    let block = super::text(label, 20.0);
+    let block = crate::ui::text(label, 20.0);
     block.set_foreground(Some(brush(TEXT)));
     block
 }
 
 /// A small accent-tinted pill, e.g. the connection state.
 pub fn pill(label: &str) -> Ref<Border> {
-    let text = super::text(label, 11.5);
+    let text = crate::ui::text(label, 11.5);
     text.set_foreground(Some(brush(0xFF0F_7B0F)));
     let border = Border::new();
     border.set_background(Some(brush(0xFFEA_F6EA)));

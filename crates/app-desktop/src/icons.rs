@@ -150,7 +150,7 @@ pub fn icon_label(glyph: Icon, label: &str) -> Ref<StackPanel> {
     row.set_orientation(ferroui_base::layout::Orientation::Horizontal);
     row.set_spacing(7.0);
     row.children().add(icon(glyph, 15.0));
-    row.children().add(super::text(label, 13.0));
+    row.children().add(crate::ui::text(label, 13.0));
     row
 }
 
