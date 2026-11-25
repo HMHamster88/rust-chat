@@ -9,13 +9,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+  desktop:
+    name: Desktop (Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +29,24 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  server:
+    name: Server (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy -p rust-chat-protocol -p rust-chat-crypto -p rust-chat-server -p rust-chat-client-core --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test -p rust-chat-protocol -p rust-chat-crypto -p rust-chat-server -p rust-chat-client-core
 
   audit:
     name: Audit

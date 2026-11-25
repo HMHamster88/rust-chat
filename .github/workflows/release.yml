@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: Windows desktop + server
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p rust-chat-desktop -p rust-chat-server
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/rust-chat.exe dist/
+          Copy-Item target/release/rust-chat-server.exe dist/
+          Copy-Item README.md dist/
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          Set-Content dist/SHA256SUMS.txt $lines
+          Compress-Archive -Path dist/* -DestinationPath "rust-chat-$($env:GITHUB_REF_NAME)-windows-x64.zip"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rust-chat-*-windows-x64.zip
+          generate_release_notes: true
+
+  linux-server:
+    name: Linux server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p rust-chat-server
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/release/rust-chat-server dist/
+          cp README.md dist/
+          cd dist
+          sha256sum rust-chat-server > SHA256SUMS.txt
+          tar -czf "../rust-chat-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" *
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rust-chat-*-linux-x86_64.tar.gz
+          generate_release_notes: true

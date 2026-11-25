@@ -1,0 +1,31 @@
+# Releasing
+
+The release workflow (`.github/workflows/release.yml`) builds tagged releases and attaches
+artifacts to a GitHub Release. The in-app updater reads
+`https://api.github.com/repos/HMHamster88/rust-chat/releases/latest`.
+
+## Checklist
+
+1. Bump the version in the workspace `Cargo.toml` (`[workspace.package] version`). All crates
+   inherit it.
+2. Add the release notes to `CHANGELOG.md`.
+3. `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+   `cargo test --workspace`, and `cargo build --release -p rust-chat-desktop -p rust-chat-server`.
+4. Commit, then tag and push:
+   ```powershell
+   git tag v0.1.0
+   git push origin main
+   git push origin v0.1.0
+   ```
+5. The workflow produces:
+   - `rust-chat-vX.Y.Z-windows-x64.zip` — `rust-chat.exe`, `rust-chat-server.exe`, README and
+     `SHA256SUMS.txt`
+   - `rust-chat-vX.Y.Z-linux-x86_64.tar.gz` — the server and checksums
+6. Verify the Release page has both assets and that `rust-chat` reports “up to date” (or the
+   new version) from the About row.
+
+## Notes
+
+- The desktop app is Windows-only; the server is cross-platform.
+- Artifacts are unsigned (no Authenticode certificate yet). SmartScreen may warn.
+- No license has been chosen for the product crates yet; decide before distributing widely.

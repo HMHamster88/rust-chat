@@ -12,8 +12,8 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M6 complete (file transfer with hashing, progress, cancel and Downloads). Next: M7
-  Android. M0–M5 results and the M6 details are in §11/§12.
+- **Status:** M6 complete; M7 desktop polish next, then M8 releases/updates (pipeline and in-app
+  update check already landed), Android last (M9). M0–M5 results and the M6 details are in §11/§12.
 
 ---
 
@@ -192,11 +192,12 @@ Every row must exist or be explicitly dropped.
 | **M4** | Mesh polish: presence/levels/stats/ICE restart/reconnect | 4 peers; churn; relay path; no stale peers | 2 wk |
 | **M5** | Screen share + remote control | Share window/screen; repeated start/stop; input with lease; CPU target | 3 wk |
 | **M6** | File transfer + previews + captions | 1 GiB hash match; cancel mid-flight; relay path; no resume documented | 1.5 wk |
-| **M7** | Android: UI, audio, video receive, files, foreground service, IME | Real TECNO device: voice + text + receive + watch + settings persist | 4–6 wk |
-| **M8** | Parity polish: settings, updater, installers, CI matrix, soak, docs | 1 h soak with 4 clients; flat memory; release artifacts | 3 wk |
+| **M7** | Desktop polish: settings screen, file previews, per-peer stats, soak, accessibility | No open parity gaps except Android; 1 h soak with 4 clients; settings persist | 2–3 wk |
+| **M8** | Releases and updates: CI matrix, Windows package/installer, GitHub releases, in-app update check, docs | Tagged release builds reproducibly; update check works; install/uninstall clean | 1–2 wk |
+| **M9** | Android (last): UI, audio, video receive, files, foreground service, IME | Real TECNO device: voice + text + receive + watch + settings persist | 4–6 wk |
 
-Total ~18–22 weeks full-time; realistically 6–9 months part-time. M3/M5 and M7 are where it can
-slip.
+Total ~18–22 weeks full-time; realistically 6–9 months part-time. M3/M5 and M9 (Android, moved to
+the end by request) are where it can slip.
 
 ---
 
@@ -457,5 +458,26 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   release.
 - Remaining: image previews and open-when-finished by default (the Open button exists); resume is
   still explicitly not supported.
+
+### M7 — desktop polish (next)
+
+- Settings screen: connection, audio/video devices, chat (clock/scale/history), files, appearance,
+  about; immediate apply and destructive-action confirmations.
+- File image previews and “open when finished”; drag-and-drop paths; progress list for multiple
+  transfers rather than one active row.
+- UI accessibility names for automation, keyboard navigation, Enter-to-send/Shift+Enter, IME polish.
+- 1-hour soak with 4 clients, memory/CPU regression checks, and a TURN-relayed transfer exercise.
+
+### M8 — releases and updates
+
+- **Landed:** GitHub Actions release workflow for tagged Windows/Linux builds with SHA-256 sums,
+  CHANGELOG/releasing docs, in-app GitHub release check with “Open release”, and startup toggle.
+- Still to do: Windows installer (MSI or Inno Setup) alongside the portable zip, Authenticode
+  signing (optional), automatic download of the new build, and update notes in the UI.
+
+### M9 — Android (last)
+
+- `cdylib` built with `cargo ndk`, FerroUI Android shell, AAudio, receive-only VP8, files via SAF,
+  foreground service and IME; tested on the TECNO device.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

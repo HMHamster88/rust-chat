@@ -11,14 +11,16 @@ coturn, unchanged.
 - Design and milestones: [docs/PLAN.md](docs/PLAN.md)
 - Wire protocol v2: [docs/PROTOCOL.md](docs/PROTOCOL.md)
 - Kotlin baseline (RAM/CPU): [docs/BASELINE.md](docs/BASELINE.md)
+- Release history: [CHANGELOG.md](CHANGELOG.md)
+- Release process: [docs/RELEASING.md](docs/RELEASING.md)
 
 ## Status
 
-**M6 complete — file transfer.** Files move peer-to-peer over a reliable `files` data channel:
-offer/accept/decline, caption, live progress, cancel, SHA-256 verification, `.part` rename,
-numeric suffixes, and the Downloads folder (writability checked). The sender hashes first and the
-receiver verifies before finishing; a 1 GiB transfer matched hashes in 23.8 s (release). Next is
-**M7: Android**. Previews and the remaining parity polish stay for M8.
+**M6 complete — file transfer.** Text, voice, screen sharing, remote control and files all work on
+the desktop client and self-hosted server. Android is deliberately last (M9); next is desktop
+polish (M7), then the release/update polish (M8). Tagged builds are produced by GitHub Actions and
+the app checks GitHub for newer releases from the About row. See the changelog for the 0.1.0
+feature set and known gaps.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.
@@ -36,7 +38,7 @@ the feature specification, not a runtime peer.
 | `crates/media-android` | AAudio, platform AEC, GLES/Vulkan |
 | `crates/ui` | Shared screens, widgets and theme |
 | `crates/app-desktop` | `rust-chat` binary |
-| `crates/app-android` | cdylib + thin Kotlin/Java shell |
+| `crates/app-android` | cdylib + thin Kotlin/Java shell (M9, last) |
 | `spikes/` | M0 toolkit and media gates (separate Cargo projects, not product code) |
 
 ## Build
@@ -45,6 +47,16 @@ the feature specification, not a runtime peer.
 cargo check --workspace
 cargo test --workspace
 ```
+
+Release builds:
+
+```powershell
+cargo build --release -p rust-chat-desktop -p rust-chat-server
+```
+
+Tagged pushes (`vX.Y.Z`) build and attach the Windows client/server zip and the Linux server
+tarball to a GitHub Release; the client's **Check for updates** button reads the latest release
+from `HMHamster88/rust-chat`.
 
 Server first run:
 

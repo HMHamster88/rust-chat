@@ -6,6 +6,7 @@ pub mod pins;
 pub mod settings;
 pub mod snapshot;
 pub mod tls;
+pub mod update;
 
 pub use client::{ClientHandle, Command, ConnectRequest, IncomingSignal};
 pub use settings::{ClientSettings, ConnectionMemory, SettingsStore};

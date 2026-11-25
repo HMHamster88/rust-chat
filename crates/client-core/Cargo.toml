@@ -22,6 +22,7 @@ thiserror = { workspace = true }
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-rustls = { version = "0.26.6", default-features = false }
 tokio-tungstenite = "0.30.0"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls", "json"] }
 
 [dev-dependencies]
 rcgen = { workspace = true }

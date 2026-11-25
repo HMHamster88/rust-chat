@@ -42,6 +42,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 [profile.release]
 lto = "thin"
 codegen-units = 4
+strip = "symbols"
 
 [profile.dist]
 inherits = "release"

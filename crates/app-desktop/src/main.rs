@@ -1,6 +1,7 @@
-//! FerroUI desktop shell: connect/trust, rooms, chat, local history and voice.
+//! FerroUI desktop shell: connect/trust, rooms, chat, history, voice, video, files and control.
 
 #![cfg(windows)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use ferroui_base::collections::FerroList;
 use ferroui_base::input::{
@@ -22,6 +23,7 @@ use ferroui_media_controls::TexturePresenter;
 use ferroui_themes_fluent::FluentTheme;
 use rust_chat_client_core::{
     ChatSnapshot, ClientHandle, ClientSettings, ConnectRequest, ConnectionMemory, ConnectionState,
+    update,
 };
 use rust_chat_desktop::control::{DEFAULT_LEASE_SECS, InputEvent, RemoteButton, countdown};
 use rust_chat_desktop::files::human_size;
@@ -33,7 +35,11 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
+
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+type UpdateResult = Result<Option<update::Release>, String>;
 
 struct Startup {
     settings: ClientSettings,
@@ -193,6 +199,13 @@ struct Ui {
     file_members_sig: RefCell<String>,
     file_line: RefCell<String>,
     file_shown: RefCell<String>,
+    update_status: Ref<TextBlock>,
+    update_check: Ref<Button>,
+    update_open: Ref<Button>,
+    update_auto: Ref<CheckBox>,
+    update_rx: RefCell<Option<Receiver<UpdateResult>>>,
+    update_tx: Sender<UpdateResult>,
+    update_url: RefCell<Option<String>>,
     presenter: Ref<TexturePresenter>,
     video_host: Ref<Grid>,
     surface: Rc<RefCell<VideoSurface>>,
@@ -528,6 +541,29 @@ impl Ui {
         if self.voice.borrow().is_some() {
             self.send_voice_command(VoiceCommand::ConfigureShare(share));
         }
+    }
+
+    fn check_updates(&self) {
+        self.update_status.set_text(Some("checking\u{2026}"));
+        let tx = self.update_tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::check(APP_VERSION));
+        });
+    }
+
+    fn open_release(&self) {
+        if let Some(url) = self.update_url.borrow().clone() {
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "start", "", &url])
+                .spawn();
+        }
+    }
+
+    fn set_update_auto(&self, checked: bool) {
+        let mut settings = self.settings.borrow().clone();
+        settings.check_for_updates = checked;
+        *self.settings.borrow_mut() = settings.clone();
+        let _ = self.memory.save_settings(&settings);
     }
 
     fn request_control(&self) {
@@ -904,6 +940,31 @@ fn create_main_window() -> Ref<Window> {
     let connect_status = text("not connected", 14.0);
     let error_text = text("", 13.0);
 
+    let update_status = text("", 12.0);
+    let update_check = Button::new();
+    update_check.set_content(Some(Rc::new("Check for updates".to_string())));
+    let update_open = Button::new();
+    update_open.set_content(Some(Rc::new("Open release".to_string())));
+    update_open.set_is_visible(false);
+    let update_auto = CheckBox::new();
+    update_auto.set_content(Some(Rc::new("Check at startup".to_string())));
+    update_auto.set_is_checked(Some(settings.check_for_updates));
+    let update_row = row();
+    update_row
+        .children()
+        .add(text(&format!("rust-chat {APP_VERSION}"), 12.0));
+    update_row.children().add(update_check.clone());
+    update_row.children().add(update_open.clone());
+    update_row.children().add(update_auto.clone());
+    update_row.children().add(update_status.clone());
+    let (update_tx, update_rx) = std::sync::mpsc::channel();
+    if settings.check_for_updates {
+        let tx = update_tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(update::check(APP_VERSION));
+        });
+    }
+
     let trust_text = text("", 13.0);
     let approve = Button::new();
     approve.set_content(Some(Rc::new("Approve".to_string())));
@@ -1128,6 +1189,7 @@ fn create_main_window() -> Ref<Window> {
     root.children().add(connect_panel.clone());
     root.children().add(room_panel.clone());
     root.children().add(error_text.clone());
+    root.children().add(update_row);
 
     let ui = Rc::new(Ui {
         client: startup.client,
@@ -1205,6 +1267,13 @@ fn create_main_window() -> Ref<Window> {
         file_members_sig: RefCell::new(String::new()),
         file_line: RefCell::new(String::new()),
         file_shown: RefCell::new(String::new()),
+        update_status,
+        update_check,
+        update_open,
+        update_auto,
+        update_rx: RefCell::new(Some(update_rx)),
+        update_tx,
+        update_url: RefCell::new(None),
         presenter,
         video_host,
         surface,
@@ -1243,7 +1312,7 @@ fn create_main_window() -> Ref<Window> {
     }
 
     let window = Window::new();
-    window.set_title(Some("rust-chat".to_string()));
+    window.set_title(Some(format!("rust-chat {APP_VERSION}")));
     window.set_width(1100.0);
     window.set_height(920.0);
     window.set_padding(Thickness::uniform(18.0));
@@ -1449,6 +1518,30 @@ fn wire(ui: &Rc<Ui>) {
             }
         }
     });
+    ui.update_check.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.check_updates();
+            }
+        }
+    });
+    ui.update_open.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.open_release();
+            }
+        }
+    });
+    ui.update_auto.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_update_auto(ui.update_auto.is_checked().unwrap_or(true));
+            }
+        }
+    });
 }
 
 fn attach_control_input(ui: &Rc<Ui>) {
@@ -1534,6 +1627,26 @@ fn refresh(ui: &Rc<Ui>) {
     ui.connect_status.set_text(Some(&status));
     ui.error_text
         .set_text(Some(snapshot.last_error.as_deref().unwrap_or("")));
+
+    let update_result = ui
+        .update_rx
+        .borrow()
+        .as_ref()
+        .and_then(|rx| rx.try_recv().ok());
+    if let Some(result) = update_result {
+        match result {
+            Ok(Some(release)) => {
+                ui.update_status
+                    .set_text(Some(&format!("version {} is available", release.version)));
+                *ui.update_url.borrow_mut() = Some(release.url);
+                ui.update_open.set_is_visible(true);
+            }
+            Ok(None) => ui
+                .update_status
+                .set_text(Some(&format!("up to date (v{APP_VERSION})"))),
+            Err(error) => ui.update_status.set_text(Some(&error)),
+        }
+    }
 
     if let Some(trust) = &snapshot.trust {
         ui.trust_panel.set_is_visible(true);
