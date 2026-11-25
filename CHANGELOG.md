@@ -7,10 +7,18 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 ### Added
 
+- Material Design Icons: a 4.7 KB subset is bundled in the executable and registered from memory; the
+  action buttons are icon-only with automation names (settings, disconnect, mute, share, send,
+  file accept/decline/open, remote control, update check).
+- Three-pane room shell: sidebar with rooms, members and navigation; header with the room state and
+  icon actions; message feed with name/time bubbles, own-message tint and scroll-to-end; right rail
+  with voice, files and sharing cards.
 - Settings screen (M7): connection (auto-connect, forget pinned key), chat (timestamps, 24-hour
   clock, keep history, clear local history), audio devices, default share quality, received-files
   folder with "open when finished", and an About section. Every change is persisted immediately;
-  destructive actions need a second click.
+  destructive actions need a confirmation click. The window is sized/centred for the work area and
+  the panel scrolls.
+- Branded connect screen: product panel plus a centred connection card.
 - The desktop window is sized and centered in the work area, and the settings panel scrolls, so
   nothing is cut off on screens shorter than 920 px.
 
