@@ -488,6 +488,7 @@ impl ClientTask {
         let motd = welcome.motd.clone();
         let self_id = welcome.session_id.clone();
         let max_chat_bytes = welcome.limits.max_chat_bytes;
+        let turn = welcome.turn.clone();
         self.update(|snapshot| {
             snapshot.server_name = server_name;
             snapshot.motd = motd;
@@ -495,6 +496,7 @@ impl ClientTask {
             snapshot.rooms = rooms;
             snapshot.max_chat_bytes = max_chat_bytes;
             snapshot.last_error = None;
+            snapshot.turn = turn;
         });
 
         let state: RoomState = recv_payload(socket, kind::ROOM_STATE).await?;
@@ -812,6 +814,7 @@ impl ClientTask {
         self.update(|snapshot| {
             snapshot.connection = ConnectionState::Idle;
             snapshot.trust = None;
+            snapshot.turn = None;
         });
     }
 

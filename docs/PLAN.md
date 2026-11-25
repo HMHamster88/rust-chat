@@ -12,9 +12,9 @@ code, module layout, library choice or wire protocol is preserved. Protocol v2 i
 - **Media:** pure Rust WebRTC (`webrtc-rs`/`rtc`), Opus, VP8, WebRTC audio processing.
 - **UI:** FerroUI 0.5 (Direct2D on Windows, Skia on Android), decided by the M0 gates; texture
   presentation is the first M3 gate.
-- **Status:** M3 complete (voice mesh + screen sharing). Next: M4 mesh polish, ICE restart and
-  TURN. M0/M1/M2 results and the M3 media details are in §11/§12; the settings screen, update
-  checker and device pickers remain.
+- **Status:** M4 complete (mesh polish: TURN, peer rebuild, PLI, stats, auto-rejoin, 4-peer churn).
+  Next: M5 remote control and the screen-share pickers. M0–M3 results and the M4 details are in
+  §11/§12; settings, update checker and device pickers remain.
 
 ---
 
@@ -377,5 +377,30 @@ Android (the only backend there). The two remaining unknowns are explicit M3 tas
   presenter pane.
 - Still open for M4: TURN/relay path, ICE restart, PLI-driven keyframes, monitor/window picker,
   resolution/fps settings, 4-peer measurement.
+
+### M4 — mesh polish (2026-11-25)
+
+- **TURN.** `welcome.turn` is now kept in the client snapshot and translated into a WebRTC
+  `RTCIceServer`, so any configured coturn is used for srflx/relay candidates. Without TURN the
+  mesh stays on host candidates.
+- **Peer lifecycle.** Every peer task reports completion on a controller channel; a dead peer is
+  removed immediately, so a stale entry can never block a reconnect. The designated offerer
+  rebuilds the connection with 0.5/1/2 s backoff, up to three attempts; the other side waits for
+  the new offer. `RTCPeerConnectionState::Failed/Disconnected` is detected within 1 s.
+- **Keyframes.** A receiver asks for a keyframe when the VP8 decoder loses its reference (and once
+  after connecting) using `rtc.signal {kind:"need-keyframe"}`. The sharer forces its next encoded
+  frame to be a keyframe; the 5 s periodic keyframe remains the fallback.
+- **Stats.** Every 2 s each peer reports the selected candidate pair's RTT and whether either end
+  is a relay candidate. The member line shows `(12 ms)` or `(relay 20 ms)`.
+- **Reconnect.** Losing the control plane stops the mesh and arms an auto-rejoin; once the client
+  is back in the same room it rebuilds the call without user action. Verified by killing and
+  restarting the server during a live call.
+- Verified with **4 real app instances**: all show three peers, `(0 ms)` links, 117.8 MB working
+  set and 2.2% of one core on the measured client. A 4-client integration test joins the mesh,
+  carries audio from all peers, then drops one participant and checks the other three keep
+  receiving audio.
+- Tests: 78 total (TURN credentials, 4-peer churn, keyframe plumbing), `clippy -D warnings` clean.
+- Remaining for M5+: live coturn relay test, monitor/window picker, resolution/fps settings,
+  audio device pickers, remote-control lease.
 - Still open for the rest of M3: VP8 screen capture/encode/decode and the Direct2D presenter,
   device pickers, TURN, and the 4-peer measurement.

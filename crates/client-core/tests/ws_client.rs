@@ -5,7 +5,7 @@ use rust_chat_client_core::history::HistoryStore;
 use rust_chat_client_core::settings::ClientSettings;
 use rust_chat_client_core::{ChatSnapshot, ConnectionState};
 use rust_chat_crypto::PasswordVerifier;
-use rust_chat_server::config::{RoomConfig, ServerConfig};
+use rust_chat_server::config::{RoomConfig, ServerConfig, TurnConfig};
 use rust_chat_server::server;
 use rust_chat_server::state::Shared;
 use std::sync::Arc;
@@ -112,6 +112,61 @@ async fn connects_chats_and_writes_history() {
             .any(|message| message.text == "hello over the real socket")
     );
 
+    assert!(client.disconnect());
+    drop(client);
+    server_task.abort();
+}
+
+#[tokio::test]
+async fn turn_credentials_reach_the_client_snapshot() {
+    let mut config = ServerConfig::default();
+    config.tls.enabled = false;
+    config.turn = Some(TurnConfig {
+        urls: vec!["turn:127.0.0.1:3478?transport=udp".into()],
+        secret: "turn-test-secret".into(),
+        ttl_seconds: 600,
+    });
+    config.client_rooms_file = std::env::temp_dir()
+        .join(format!("rust-chat-turn-rooms-{}", std::process::id()))
+        .join("rooms.json")
+        .to_string_lossy()
+        .into_owned();
+    config.rooms = vec![RoomConfig {
+        id: "lobby".into(),
+        name: "Lobby".into(),
+        topic: String::new(),
+        voice: true,
+    }];
+    let verifier = PasswordVerifier::create(PASSWORD, 8, 1, 1).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server_task = tokio::spawn(async move {
+        server::serve_test(Shared::new(config, verifier).unwrap(), listener)
+            .await
+            .unwrap();
+    });
+    let settings = ClientSettings {
+        host: "127.0.0.1".into(),
+        port: address.port(),
+        tls: false,
+        name: "alice".into(),
+        ..ClientSettings::default()
+    };
+    let client = ClientHandle::spawn_in(settings, &tokio::runtime::Handle::current(), root("turn"));
+    assert!(client.connect(ConnectRequest {
+        host: "127.0.0.1".into(),
+        port: address.port(),
+        tls: false,
+        name: "alice".into(),
+        password: PASSWORD.into(),
+        room: None,
+    }));
+    let snapshot = wait_for(&client, |snapshot| snapshot.turn.is_some()).await;
+    let turn = snapshot.turn.unwrap();
+    assert_eq!(turn.urls[0], "turn:127.0.0.1:3478?transport=udp");
+    assert!(turn.username.contains(':'));
+    assert!(!turn.credential.is_empty());
+    assert_eq!(turn.ttl_seconds, 600);
     assert!(client.disconnect());
     drop(client);
     server_task.abort();

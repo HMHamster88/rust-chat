@@ -82,6 +82,8 @@ struct VoiceRuntime {
     room: String,
     /// Levels keyed by session id; the empty key is the local microphone.
     levels: RefCell<HashMap<String, (f32, Instant)>>,
+    /// Compact ICE labels such as `relay 34 ms`.
+    stats: RefCell<HashMap<String, String>>,
     members_signature: RefCell<String>,
 }
 
@@ -129,6 +131,8 @@ struct Ui {
     voice_status: Ref<TextBlock>,
     voice_note: RefCell<Option<String>>,
     voice_line: RefCell<String>,
+    voice_wanted: Cell<bool>,
+    voice_room_id: RefCell<Option<String>>,
     voice: RefCell<Option<VoiceRuntime>>,
 }
 
@@ -241,7 +245,13 @@ impl Ui {
                 return;
             }
         };
-        let controller = voice::start(self.client.clone(), self_id, handle, &self.runtime);
+        let controller = voice::start(
+            self.client.clone(),
+            self_id,
+            handle,
+            &self.runtime,
+            snapshot.turn.clone(),
+        );
         *self.voice.borrow_mut() = Some(VoiceRuntime {
             audio,
             controller,
@@ -250,16 +260,19 @@ impl Ui {
             sharing: Cell::new(false),
             room: room.room.id.clone(),
             levels: RefCell::new(HashMap::new()),
+            stats: RefCell::new(HashMap::new()),
             members_signature: RefCell::new(String::new()),
         });
         // Muted on join, like a push-to-talk call.
         let _ = self.client.set_voice(true);
         let _ = self.client.set_presence(Some(true), Some(false), None);
         *self.voice_note.borrow_mut() = Some("joining (microphone muted)".to_owned());
-        refresh_voice(self, &snapshot);
+        self.voice_wanted.set(true);
+        *self.voice_room_id.borrow_mut() = Some(room.room.id.clone());
     }
 
     fn leave_voice(&self, reason: Option<&str>) {
+        self.voice_wanted.set(false);
         let taken = self.voice.borrow_mut().take();
         if let Some(mut runtime) = taken {
             runtime.controller.send(VoiceCommand::Stop);
@@ -551,6 +564,8 @@ fn create_main_window() -> Ref<Window> {
         voice_status,
         voice_note: RefCell::new(None),
         voice_line: RefCell::new(String::new()),
+        voice_wanted: Cell::new(false),
+        voice_room_id: RefCell::new(None),
         voice: RefCell::new(None),
     });
 
@@ -753,6 +768,12 @@ fn refresh(ui: &Rc<Ui>) {
             .as_ref()
             .map(|runtime| runtime.levels.borrow().clone())
             .unwrap_or_default();
+        let stats = ui
+            .voice
+            .borrow()
+            .as_ref()
+            .map(|runtime| runtime.stats.borrow().clone())
+            .unwrap_or_default();
         let mut members = String::new();
         for member in &room.members {
             if !members.is_empty() {
@@ -771,6 +792,11 @@ fn refresh(ui: &Rc<Ui>) {
             }
             if member.voice {
                 members.push_str(" [voice]");
+            }
+            if let Some(label) = stats.get(&member.session_id)
+                && !label.is_empty()
+            {
+                members.push_str(&format!(" ({label})"));
             }
             if speaking(&levels, if is_self { "" } else { &member.session_id }) {
                 members.push_str(" \u{266a}");
@@ -836,7 +862,14 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
         }
     }
     if let Some(reason) = stop {
+        let reconnect = reason == "disconnected";
         ui.leave_voice(Some(reason));
+        if reconnect {
+            // The WebSocket will come back; rejoin the same room's call automatically.
+            ui.voice_wanted.set(true);
+        } else {
+            *ui.voice_room_id.borrow_mut() = None;
+        }
     }
     let Some(room) = snapshot.room.as_ref() else {
         return;
@@ -849,7 +882,7 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
         if let Some(runtime) = slot.as_mut() {
             loop {
                 match runtime.controller.try_recv() {
-                    Some(VoiceEvent::Ready) => {
+                    Some(VoiceEvent::Ready(_)) => {
                         *ui.voice_note.borrow_mut() = Some("live".to_owned());
                     }
                     Some(VoiceEvent::Level { peer, level }) => {
@@ -863,6 +896,19 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
                             .levels
                             .borrow_mut()
                             .insert(String::new(), (level, Instant::now()));
+                    }
+                    Some(VoiceEvent::Stats {
+                        peer,
+                        rtt_ms,
+                        relayed,
+                    }) => {
+                        let label = match (relayed, rtt_ms) {
+                            (true, Some(rtt)) => format!("relay {rtt} ms"),
+                            (true, None) => "relay".to_owned(),
+                            (false, Some(rtt)) => format!("{rtt} ms"),
+                            (false, None) => String::new(),
+                        };
+                        runtime.stats.borrow_mut().insert(peer, label);
                     }
                     Some(VoiceEvent::PeerFailed(error)) => peer_error = Some(error),
                     Some(VoiceEvent::Error(error)) => {
@@ -900,6 +946,15 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
 
     let active = ui.voice.borrow().is_some();
     let voice_room = room.room.voice;
+    if !active
+        && voice_room
+        && ui.voice_wanted.get()
+        && snapshot.connection.is_ready()
+        && ui.voice_room_id.borrow().as_deref() == Some(room.room.id.as_str())
+    {
+        ui.join_voice();
+        return;
+    }
     ui.join_voice.set_is_visible(voice_room && !active);
     ui.leave_voice.set_is_visible(active);
     ui.mute_mic.set_is_visible(active);

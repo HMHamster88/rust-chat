@@ -3323,6 +3323,7 @@ dependencies = [
  "opus",
  "rand 0.10.4",
  "rtc",
+ "rust-chat-protocol",
  "thiserror 2.0.21",
  "tokio",
  "vp8-decoder",

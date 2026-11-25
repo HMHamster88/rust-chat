@@ -8,11 +8,13 @@
 use rust_chat_client_core::{ClientHandle, IncomingSignal};
 use rust_chat_media::audio::{FRAME_SAMPLES, rms};
 use rust_chat_media::video::{VideoEncoder, bgra_to_i420, fit_bgra, i420_to_bgra};
-use rust_chat_media::voice::VoicePeer;
+use rust_chat_media::voice::{VoicePeer, turn_ice_servers};
 use rust_chat_media_desktop::audio::{AudioEvent, AudioHandle, Playout};
 use rust_chat_media_desktop::capture::{CapturedFrame, ScreenCapture};
+use rust_chat_protocol::payloads::TurnCredentials;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -68,9 +70,17 @@ pub enum VoiceCommand {
 
 #[derive(Debug)]
 pub enum VoiceEvent {
-    Ready,
-    Level { peer: String, level: f32 },
+    Ready(String),
+    Level {
+        peer: String,
+        level: f32,
+    },
     SelfLevel(f32),
+    Stats {
+        peer: String,
+        rtt_ms: Option<u32>,
+        relayed: bool,
+    },
     PeerFailed(String),
     Ended,
     Error(String),
@@ -104,6 +114,7 @@ pub fn start(
     self_id: String,
     handle: AudioHandle,
     runtime: &tokio::runtime::Handle,
+    turn: Option<TurnCredentials>,
 ) -> VoiceController {
     let signals = client.subscribe_signals();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -112,6 +123,10 @@ pub fn start(
     let (video_tx, _) = broadcast::channel::<Arc<Vec<u8>>>(4);
     let (share_tx, share_rx) = mpsc::unbounded_channel();
     let (capture_tx, capture_rx) = mpsc::unbounded_channel::<CapturedFrame>();
+    let (down_tx, down_rx) = mpsc::unbounded_channel();
+    let (up_tx, up_rx) = mpsc::unbounded_channel();
+    let (wake_tx, wake_rx) = mpsc::unbounded_channel();
+    let force_keyframe = Arc::new(AtomicBool::new(false));
     let video = VideoSink::default();
     runtime.spawn(share_task(
         share_rx,
@@ -119,6 +134,7 @@ pub fn start(
         capture_rx,
         video_tx.clone(),
         event_tx.clone(),
+        force_keyframe.clone(),
     ));
     let run = VoiceRun {
         client,
@@ -128,6 +144,16 @@ pub fn start(
         commands: command_rx,
         events: event_tx,
         peers: HashMap::new(),
+        members: HashSet::new(),
+        retries: HashMap::new(),
+        down: down_tx,
+        down_rx,
+        up: up_tx,
+        up_rx,
+        wake: wake_tx,
+        wake_rx,
+        force_keyframe,
+        turn,
         local: local_tx,
         video: video_tx,
         share: share_tx,
@@ -161,6 +187,16 @@ struct VoiceRun {
     commands: mpsc::UnboundedReceiver<VoiceCommand>,
     events: mpsc::UnboundedSender<VoiceEvent>,
     peers: HashMap<String, PeerHandle>,
+    members: HashSet<String>,
+    retries: HashMap<String, u32>,
+    down: mpsc::UnboundedSender<(String, Option<String>)>,
+    down_rx: mpsc::UnboundedReceiver<(String, Option<String>)>,
+    up: mpsc::UnboundedSender<String>,
+    up_rx: mpsc::UnboundedReceiver<String>,
+    wake: mpsc::UnboundedSender<String>,
+    wake_rx: mpsc::UnboundedReceiver<String>,
+    force_keyframe: Arc<AtomicBool>,
+    turn: Option<TurnCredentials>,
     local: broadcast::Sender<Vec<i16>>,
     video: broadcast::Sender<Arc<Vec<u8>>>,
     share: mpsc::UnboundedSender<bool>,
@@ -201,6 +237,21 @@ impl VoiceRun {
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
+                down = self.down_rx.recv() => {
+                    if let Some((id, error)) = down {
+                        self.peer_down(id, error);
+                    }
+                }
+                up = self.up_rx.recv() => {
+                    if let Some(id) = up {
+                        self.retries.remove(&id);
+                    }
+                }
+                wake = self.wake_rx.recv() => {
+                    if let Some(id) = wake {
+                        self.retry_peer(id);
+                    }
+                }
                 frame = self.handle.frames.recv() => {
                     let Some(frame) = frame else {
                         let _ = self.events.send(VoiceEvent::Error(
@@ -240,6 +291,7 @@ impl VoiceRun {
     }
 
     fn sync_members(&mut self, members: Vec<String>) {
+        self.members = members.iter().cloned().collect();
         let wanted: std::collections::HashSet<&String> = members.iter().collect();
         let stale: Vec<String> = self
             .peers
@@ -252,6 +304,7 @@ impl VoiceRun {
                 peer.task.abort();
             }
         }
+        self.retries.retain(|id, _| self.members.contains(id));
         for id in members {
             if id == self.self_id || self.peers.contains_key(&id) {
                 continue;
@@ -263,6 +316,44 @@ impl VoiceRun {
         }
     }
 
+    fn peer_down(&mut self, id: String, error: Option<String>) {
+        if self.peers.remove(&id).is_none() {
+            return;
+        }
+        if !self.members.contains(&id) {
+            self.retries.remove(&id);
+            return;
+        }
+        if let Some(error) = error {
+            let _ = self.events.send(VoiceEvent::PeerFailed(error));
+        }
+        // Only the designated offerer rebuilds the connection; the other side waits.
+        if self.self_id >= id {
+            return;
+        }
+        let attempt = self.retries.entry(id.clone()).or_insert(0);
+        *attempt += 1;
+        if *attempt > 3 {
+            let _ = self.events.send(VoiceEvent::PeerFailed(format!(
+                "cannot reach peer {id} after 3 attempts"
+            )));
+            return;
+        }
+        let delay = Duration::from_millis(500u64 << (*attempt - 1).min(4));
+        let wake = self.wake.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            let _ = wake.send(id);
+        });
+    }
+
+    fn retry_peer(&mut self, id: String) {
+        if !self.members.contains(&id) || self.peers.contains_key(&id) || self.self_id >= id {
+            return;
+        }
+        self.add_offerer(id);
+    }
+
     fn add_offerer(&mut self, id: String) {
         let (signal_tx, signal_rx) = mpsc::unbounded_channel();
         let client = self.client.clone();
@@ -271,9 +362,12 @@ impl VoiceRun {
         let sink = self.sink.clone();
         let events = self.events.clone();
         let playout = self.handle.playout.clone();
+        let down = self.down.clone();
+        let up = self.up.clone();
+        let turn = self.turn.clone();
         let peer_id = id.clone();
         let task = tokio::spawn(async move {
-            if let Err(error) = run_peer(
+            let result = run_peer(
                 peer_id.clone(),
                 Offer::Create,
                 client.clone(),
@@ -282,13 +376,15 @@ impl VoiceRun {
                 signal_rx,
                 playout,
                 sink,
-                events.clone(),
+                events,
+                turn,
+                up,
             )
-            .await
-            {
+            .await;
+            if result.is_err() {
                 let _ = client.send_signal(&peer_id, json!({ "kind": "bye" }));
-                let _ = events.send(VoiceEvent::PeerFailed(error));
             }
+            let _ = down.send((peer_id, result.err()));
         });
         self.peers.insert(
             id,
@@ -307,9 +403,12 @@ impl VoiceRun {
         let sink = self.sink.clone();
         let events = self.events.clone();
         let playout = self.handle.playout.clone();
+        let down = self.down.clone();
+        let up = self.up.clone();
+        let turn = self.turn.clone();
         let peer_id = id.clone();
         let task = tokio::spawn(async move {
-            if let Err(error) = run_peer(
+            let result = run_peer(
                 peer_id.clone(),
                 Offer::Answer(sdp),
                 client.clone(),
@@ -318,13 +417,15 @@ impl VoiceRun {
                 signal_rx,
                 playout,
                 sink,
-                events.clone(),
+                events,
+                turn,
+                up,
             )
-            .await
-            {
+            .await;
+            if result.is_err() {
                 let _ = client.send_signal(&peer_id, json!({ "kind": "bye" }));
-                let _ = events.send(VoiceEvent::PeerFailed(error));
             }
+            let _ = down.send((peer_id, result.err()));
         });
         self.peers.insert(
             id,
@@ -366,6 +467,9 @@ impl VoiceRun {
                     peer.task.abort();
                 }
             }
+            "need-keyframe" => {
+                self.force_keyframe.store(true, Ordering::Relaxed);
+            }
             _ => {}
         }
     }
@@ -399,10 +503,13 @@ async fn run_peer(
     playout: Playout,
     sink: VideoSink,
     events: mpsc::UnboundedSender<VoiceEvent>,
+    turn: Option<TurnCredentials>,
+    up: mpsc::UnboundedSender<String>,
 ) -> Result<(), String> {
     // `0.0.0.0:0` gathers one host candidate per interface, which is enough on a LAN.
     let bind = std::env::var("RUST_CHAT_MEDIA_UDP").unwrap_or_else(|_| "0.0.0.0:0".to_owned());
-    let mut peer = VoicePeer::new(&bind)
+    let ice = turn.as_ref().map(turn_ice_servers).unwrap_or_default();
+    let mut peer = VoicePeer::new(&bind, ice)
         .await
         .map_err(|error| format!("voice peer: {error}"))?;
 
@@ -445,11 +552,41 @@ async fn run_peer(
     let mut received_video = peer
         .take_received_video()
         .ok_or_else(|| "the peer had no video receiver".to_owned())?;
-    let _ = events.send(VoiceEvent::Ready);
+    let mut video_lost = peer
+        .take_video_lost()
+        .ok_or_else(|| "the peer had no video loss signal".to_owned())?;
+    let _ = up.send(id.clone());
+    let _ = events.send(VoiceEvent::Ready(id.clone()));
+    // A viewer joining mid-share should not wait for the periodic keyframe.
+    client.send_signal(&id, json!({ "kind": "need-keyframe" }));
 
+    let mut last_keyframe = Instant::now();
+    let mut health = tokio::time::interval(Duration::from_secs(1));
+    health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut stats_tick = tokio::time::interval(Duration::from_secs(2));
+    stats_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_level = Instant::now() - LEVEL_INTERVAL;
     loop {
         tokio::select! {
+            _ = stats_tick.tick() => {
+                let stats = peer.link_stats().await;
+                let _ = events.send(VoiceEvent::Stats {
+                    peer: id.clone(),
+                    rtt_ms: stats.rtt_ms,
+                    relayed: stats.relayed,
+                });
+            }
+            _ = health.tick() => {
+                if peer.is_failed() {
+                    return Err("the peer connection was lost".to_owned());
+                }
+            }
+            _ = video_lost.recv() => {
+                if last_keyframe.elapsed() >= Duration::from_secs(2) {
+                    last_keyframe = Instant::now();
+                    client.send_signal(&id, json!({ "kind": "need-keyframe" }));
+                }
+            }
             frame = local.recv() => match frame {
                 Ok(frame) => {
                     if let Err(error) = peer.send_pcm(&frame).await {
@@ -514,6 +651,7 @@ async fn share_task(
     mut capture_rx: mpsc::UnboundedReceiver<CapturedFrame>,
     video: broadcast::Sender<Arc<Vec<u8>>>,
     events: mpsc::UnboundedSender<VoiceEvent>,
+    force_keyframe: Arc<AtomicBool>,
 ) {
     let mut capture: Option<ScreenCapture> = None;
     let mut encoder: Option<VideoEncoder> = None;
@@ -560,7 +698,8 @@ async fn share_task(
                     continue;
                 };
                 let i420 = bgra_to_i420(&bgra, width, height);
-                match encoder.encode(&i420, false) {
+                let keyframe = force_keyframe.swap(false, Ordering::Relaxed);
+                match encoder.encode(&i420, keyframe) {
                     Ok(Some(frame)) => {
                         let _ = video.send(Arc::new(frame.data));
                         last = Instant::now();

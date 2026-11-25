@@ -6,8 +6,12 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn two_peers_exchange_opus_audio_both_ways() {
-    let mut a = VoicePeer::new("127.0.0.1:0").await.expect("peer A");
-    let mut b = VoicePeer::new("127.0.0.1:0").await.expect("peer B");
+    let mut a = VoicePeer::new("127.0.0.1:0", Vec::new())
+        .await
+        .expect("peer A");
+    let mut b = VoicePeer::new("127.0.0.1:0", Vec::new())
+        .await
+        .expect("peer B");
 
     let offer = a.create_offer().await.expect("offer");
     assert!(offer.contains("m=audio"), "offer has no audio m-line");

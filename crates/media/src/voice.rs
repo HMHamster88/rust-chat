@@ -12,12 +12,15 @@ use rtc::peer_connection::configuration::media_engine::{
     MIME_TYPE_OPUS, MIME_TYPE_VP8, MediaEngine,
 };
 use rtc::peer_connection::sdp::RTCSessionDescription;
+use rtc::peer_connection::transport::{RTCIceCandidateType, RTCIceServer};
 use rtc::rtp::codec::vp8::Vp8Packet;
 use rtc::rtp::packetizer::Depacketizer;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
     RtpCodecKind,
 };
+use rtc::statistics::StatsSelector;
+use rtc::statistics::report::RTCStatsReportEntry;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -34,6 +37,12 @@ use webrtc::rtp_transceiver::RtpSender;
 
 pub const OPUS_PAYLOAD_TYPE: u8 = 111;
 pub const VP8_PAYLOAD_TYPE: u8 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PeerLinkStats {
+    pub rtt_ms: Option<u32>,
+    pub relayed: bool,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum VoiceError {
@@ -64,6 +73,24 @@ pub fn opus_codec() -> RTCRtpCodecParameters {
     }
 }
 
+/// Converts the server's TURN REST credentials into WebRTC ICE servers.
+pub fn turn_ice_servers(turn: &rust_chat_protocol::payloads::TurnCredentials) -> Vec<RTCIceServer> {
+    vec![RTCIceServer {
+        urls: turn.urls.clone(),
+        username: turn.username.clone(),
+        credential: turn.credential.clone(),
+    }]
+}
+
+fn is_relay(entry: Option<&RTCStatsReportEntry>) -> bool {
+    matches!(
+        entry,
+        Some(RTCStatsReportEntry::LocalCandidate(candidate))
+            | Some(RTCStatsReportEntry::RemoteCandidate(candidate))
+            if candidate.candidate_type == RTCIceCandidateType::Relay
+    )
+}
+
 pub fn vp8_codec() -> RTCRtpCodecParameters {
     RTCRtpCodecParameters {
         rtp_codec: RTCRtpCodec {
@@ -86,8 +113,10 @@ struct RtpFrame {
 struct Handler {
     gathered: mpsc::UnboundedSender<()>,
     connected: Arc<AtomicBool>,
+    failed: Arc<AtomicBool>,
     frames: mpsc::UnboundedSender<RtpFrame>,
     video: mpsc::UnboundedSender<DecodedVideo>,
+    video_lost: mpsc::UnboundedSender<()>,
     runtime: tokio::runtime::Handle,
 }
 
@@ -100,14 +129,25 @@ impl PeerConnectionEventHandler for Handler {
     }
 
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
-        if state == RTCPeerConnectionState::Connected {
-            self.connected.store(true, Ordering::Release);
+        match state {
+            RTCPeerConnectionState::Connected => {
+                self.failed.store(false, Ordering::Release);
+                self.connected.store(true, Ordering::Release);
+            }
+            RTCPeerConnectionState::Failed
+            | RTCPeerConnectionState::Disconnected
+            | RTCPeerConnectionState::Closed => {
+                self.connected.store(false, Ordering::Release);
+                self.failed.store(true, Ordering::Release);
+            }
+            _ => {}
         }
     }
 
     async fn on_track(&self, track: Arc<dyn TrackRemote>) {
         if track.kind().await == RtpCodecKind::Video {
             let video = self.video.clone();
+            let lost = self.video_lost.clone();
             self.runtime.spawn(async move {
                 let mut decoder = VideoDecoder::new();
                 let mut depacketizer = Vp8Packet::default();
@@ -119,10 +159,16 @@ impl PeerConnectionEventHandler for Handler {
                             continue;
                         };
                         frame.extend_from_slice(&payload);
-                        if packet.header.marker
-                            && let Ok(Some(picture)) = decoder.decode(&frame.split().freeze())
-                        {
-                            let _ = video.send(picture);
+                        if packet.header.marker {
+                            match decoder.decode(&frame.split().freeze()) {
+                                Ok(Some(picture)) => {
+                                    let _ = video.send(picture);
+                                }
+                                Ok(None) => {}
+                                Err(_) => {
+                                    let _ = lost.send(());
+                                }
+                            }
                         }
                     }
                 }
@@ -153,10 +199,12 @@ pub struct VoicePeer {
     encoder: OpusEncoder,
     gathered: mpsc::UnboundedReceiver<()>,
     connected: Arc<AtomicBool>,
+    failed: Arc<AtomicBool>,
     /// Decoded 48 kHz mono frames from the remote peer.
     pub received: Option<mpsc::UnboundedReceiver<Vec<i16>>>,
     /// Decoded VP8 screen frames from the remote peer.
     pub received_video: Option<mpsc::UnboundedReceiver<DecodedVideo>>,
+    video_lost: Option<mpsc::UnboundedReceiver<()>>,
     configured_ssrc: u32,
     ssrc: u32,
     payload_type: u8,
@@ -165,7 +213,7 @@ pub struct VoicePeer {
 }
 
 impl VoicePeer {
-    pub async fn new(udp_addr: &str) -> Result<Self, VoiceError> {
+    pub async fn new(udp_addr: &str, ice_servers: Vec<RTCIceServer>) -> Result<Self, VoiceError> {
         let runtime = webrtc::runtime::default_runtime()
             .ok_or_else(|| VoiceError::Message("no WebRTC runtime".into()))?;
         let mut media = MediaEngine::default();
@@ -176,7 +224,9 @@ impl VoicePeer {
         let (gathered_tx, gathered_rx) = mpsc::unbounded_channel();
         let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<RtpFrame>();
         let (video_tx, video_rx) = mpsc::unbounded_channel();
+        let (lost_tx, lost_rx) = mpsc::unbounded_channel();
         let connected = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(AtomicBool::new(false));
         let (pcm_tx, pcm_rx) = mpsc::unbounded_channel();
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
@@ -196,12 +246,17 @@ impl VoicePeer {
         let handler = Arc::new(Handler {
             gathered: gathered_tx,
             connected: connected.clone(),
+            failed: failed.clone(),
             frames: frame_tx,
             video: video_tx,
+            video_lost: lost_tx,
             runtime: tokio::runtime::Handle::current(),
         });
+        let configuration = RTCConfigurationBuilder::new()
+            .with_ice_servers(ice_servers)
+            .build();
         let connection = PeerConnectionBuilder::new()
-            .with_configuration(RTCConfigurationBuilder::new().build())
+            .with_configuration(configuration)
             .with_media_engine(media)
             .with_interceptor_registry(registry)
             .with_handler(handler)
@@ -266,8 +321,10 @@ impl VoicePeer {
             encoder: OpusEncoder::new()?,
             gathered: gathered_rx,
             connected,
+            failed,
             received: Some(pcm_rx),
             received_video: Some(video_rx),
+            video_lost: Some(lost_rx),
             configured_ssrc,
             ssrc: configured_ssrc,
             payload_type: OPUS_PAYLOAD_TYPE,
@@ -280,6 +337,31 @@ impl VoicePeer {
         self.connected.load(Ordering::Acquire)
     }
 
+    /// True once the transport has failed or closed; the caller rebuilds the peer.
+    pub fn is_failed(&self) -> bool {
+        self.failed.load(Ordering::Acquire)
+    }
+
+    /// Selected candidate pair: round-trip time and whether the path is relayed.
+    pub async fn link_stats(&self) -> PeerLinkStats {
+        let report = self
+            .connection
+            .get_stats(Instant::now(), StatsSelector::None)
+            .await;
+        let Some(pair) = report
+            .candidate_pairs()
+            .find(|pair| pair.nominated)
+            .or_else(|| report.candidate_pairs().next())
+        else {
+            return PeerLinkStats::default();
+        };
+        let rtt_ms = (pair.current_round_trip_time > 0.0)
+            .then(|| (pair.current_round_trip_time * 1000.0).round() as u32);
+        let relayed = is_relay(report.get(&pair.local_candidate_id))
+            || is_relay(report.get(&pair.remote_candidate_id));
+        PeerLinkStats { rtt_ms, relayed }
+    }
+
     /// Moves the decoded-frame receiver out so a peer task can select on it while
     /// still calling `send_pcm` on the connection.
     pub fn take_received(&mut self) -> Option<mpsc::UnboundedReceiver<Vec<i16>>> {
@@ -288,6 +370,11 @@ impl VoicePeer {
 
     pub fn take_received_video(&mut self) -> Option<mpsc::UnboundedReceiver<DecodedVideo>> {
         self.received_video.take()
+    }
+
+    /// Signals that the VP8 decoder lost its reference and needs a keyframe.
+    pub fn take_video_lost(&mut self) -> Option<mpsc::UnboundedReceiver<()>> {
+        self.video_lost.take()
     }
 
     pub async fn wait_connected(&self, timeout: Duration) -> Result<(), VoiceError> {
@@ -403,12 +490,31 @@ impl VoicePeer {
     pub async fn close(&self) {
         let _ = self.connection.close().await;
     }
-
     async fn wait_gathered(&mut self) -> Result<(), VoiceError> {
         tokio::time::timeout(Duration::from_secs(5), self.gathered.recv())
             .await
             .map_err(|_| VoiceError::Message("ICE gathering timed out".into()))?
             .ok_or_else(|| VoiceError::Message("ICE gathering channel closed".into()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn turn_credentials_become_ice_servers() {
+        let turn = rust_chat_protocol::payloads::TurnCredentials {
+            urls: vec!["turn:relay.example:3478?transport=udp".into()],
+            username: "1700000000:session".into(),
+            credential: "secret".into(),
+            ttl_seconds: 600,
+        };
+        let servers = turn_ice_servers(&turn);
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0].urls, turn.urls);
+        assert_eq!(servers[0].username, turn.username);
+        assert_eq!(servers[0].credential, turn.credential);
     }
 }

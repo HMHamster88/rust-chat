@@ -12,6 +12,7 @@ futures-util = "0.3.34"
 opus = "0.4.0"
 rand = "0.10.4"
 rtc = "0.21.1"
+rust-chat-protocol = { path = "../protocol" }
 thiserror = { workspace = true }
 tokio = { version = "1.54.1", features = ["full"] }
 vp8-decoder = "0.1.3"

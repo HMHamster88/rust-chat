@@ -182,9 +182,10 @@ otherwise the server answers `E_NOT_IN_ROOM`.
 }
 ```
 
-`kind` is `offer`, `answer`, `ice` or `bye`. The server checks only that `to` is a live session in
-the sender's room, and forwards SDP/candidates byte-for-byte. A target outside the room is
-`E_BAD_TARGET`, without revealing whether the session exists.
+`kind` is `offer`, `answer`, `ice`, `bye` or `need-keyframe`. The server checks only that `to` is
+a live session in the sender's room, and forwards SDP/candidates byte-for-byte. A target outside
+the room is `E_BAD_TARGET`, without revealing whether the session exists. `need-keyframe` asks a
+screen sharer to force its next VP8 frame to be a keyframe.
 
 ---
 
@@ -306,6 +307,8 @@ a third track) would require perfect negotiation with rollback and replace this 
 ### 6.4 ICE
 
 - Servers come from `welcome.turn`; with no TURN, only host/srflx candidates exist.
+- The desktop client passes those TURN REST credentials straight into its ICE configuration, so a
+  configured coturn provides relay candidates without any protocol change.
 - Trickle ICE via `rtc.signal {kind:"ice"}` is defined, but the desktop implementation gathers
   host candidates before sending the SDP, so offers and answers carry their candidates inline.
   The `ice` kind remains available for networks that need it.

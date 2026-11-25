@@ -1,6 +1,7 @@
 //! Everything the UI renders, updated by the client task.
 
 use crate::ConnectionState;
+use rust_chat_protocol::payloads::TurnCredentials;
 use rust_chat_protocol::{ChatMessage, RoomState, RoomSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub struct ChatSnapshot {
     pub latency_ms: Option<i64>,
     pub max_chat_bytes: usize,
     pub roomless: bool,
+    pub turn: Option<TurnCredentials>,
 }
 
 impl Default for ChatSnapshot {
@@ -43,6 +45,7 @@ impl Default for ChatSnapshot {
             latency_ms: None,
             max_chat_bytes: 4096,
             roomless: false,
+            turn: None,
         }
     }
 }

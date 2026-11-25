@@ -137,12 +137,14 @@ async fn two_clients_exchange_opus_through_the_server() {
         alice_id.clone(),
         alice_audio.handle,
         &tokio::runtime::Handle::current(),
+        None,
     );
     let mut bob_voice = voice::start(
         bob.clone(),
         bob_id.clone(),
         bob_audio.handle,
         &tokio::runtime::Handle::current(),
+        None,
     );
 
     // Announce voice and wait until both authoritative member lists see it.
@@ -187,12 +189,12 @@ async fn two_clients_exchange_opus_through_the_server() {
         let _ = alice_audio.frames.send(sine(&mut phase_a, 0.4));
         let _ = bob_audio.frames.send(sine(&mut phase_b, 0.4));
         for event in std::iter::from_fn(|| alice_voice.try_recv()) {
-            if matches!(event, VoiceEvent::Ready) {
+            if matches!(event, VoiceEvent::Ready(_)) {
                 ready += 1;
             }
         }
         for event in std::iter::from_fn(|| bob_voice.try_recv()) {
-            if matches!(event, VoiceEvent::Ready) {
+            if matches!(event, VoiceEvent::Ready(_)) {
                 ready += 1;
             }
         }
@@ -238,4 +240,138 @@ fn rms_f32(samples: &[f32]) -> f32 {
         return 0.0;
     }
     (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn four_clients_mesh_audio_and_survive_a_leave() {
+    unsafe {
+        std::env::set_var("RUST_CHAT_MEDIA_UDP", "127.0.0.1:0");
+    }
+    let (address, server_task) = start_server().await;
+    let mut clients = Vec::new();
+    for (name, tag) in [
+        ("ana", "four-a"),
+        ("ben", "four-b"),
+        ("cy", "four-c"),
+        ("dee", "four-d"),
+    ] {
+        clients.push(connect(address, name, tag).await);
+    }
+    let mut ids = Vec::new();
+    for client in &clients {
+        ids.push(client.snapshot().self_id.clone().unwrap());
+    }
+    let mut audios: Vec<(mpsc::UnboundedSender<Vec<i16>>, Playout)> = Vec::new();
+    let mut _event_keepers = Vec::new();
+    let mut controllers = Vec::new();
+    for (client, id) in clients.iter().zip(&ids) {
+        let fake = fake_audio();
+        let FakeAudio {
+            handle,
+            frames,
+            _events,
+            playout,
+        } = fake;
+        let controller = voice::start(
+            client.clone(),
+            id.clone(),
+            handle,
+            &tokio::runtime::Handle::current(),
+            None,
+        );
+        audios.push((frames, playout));
+        _event_keepers.push(_events);
+        controllers.push(controller);
+    }
+    for client in &clients {
+        let _ = client.set_voice(true);
+    }
+    for client in &clients {
+        wait_for(client, |snapshot| {
+            snapshot
+                .room
+                .as_ref()
+                .is_some_and(|room| room.members.iter().filter(|member| member.voice).count() >= 4)
+        })
+        .await;
+    }
+    for controller in &controllers {
+        controller.send(VoiceCommand::Members(ids.clone()));
+        controller.send(VoiceCommand::MicMuted(false));
+    }
+
+    let mut pcm = vec![Vec::new(); clients.len()];
+    let mut phase = 0.0f64;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        for (frames, _) in &audios {
+            let _ = frames.send(sine(&mut phase, 0.35));
+        }
+        for (index, (_, playout)) in audios.iter().enumerate() {
+            pcm[index].extend(playout.drain());
+        }
+        if pcm.iter().all(|samples| samples.len() >= FRAME_SAMPLES * 5) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for (index, samples) in pcm.iter().enumerate() {
+        assert!(
+            samples.len() >= FRAME_SAMPLES * 5,
+            "client {index} received only {} samples in a 4-peer mesh",
+            samples.len()
+        );
+        assert!(rms_f32(samples) > 0.05, "client {index} heard silence");
+    }
+
+    // One participant leaves; the remaining three must keep talking.
+    let removed = clients.pop().unwrap();
+    let removed_id = ids[3].clone();
+    let _ = removed.disconnect();
+    drop(removed);
+    for client in &clients {
+        wait_for(client, |snapshot| {
+            snapshot.room.as_ref().is_some_and(|room| {
+                !room
+                    .members
+                    .iter()
+                    .any(|member| member.session_id == removed_id)
+            })
+        })
+        .await;
+    }
+    let remaining: Vec<String> = ids[..3].to_vec();
+    for controller in &controllers[..3] {
+        controller.send(VoiceCommand::Members(remaining.clone()));
+    }
+    let mut after = [0usize; 3];
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    while tokio::time::Instant::now() < deadline {
+        for (frames, _) in &audios[..3] {
+            let _ = frames.send(sine(&mut phase, 0.35));
+        }
+        for (index, (_, playout)) in audios[..3].iter().enumerate() {
+            after[index] += playout.drain().len();
+        }
+        if after.iter().all(|samples| *samples >= FRAME_SAMPLES * 2) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    for (index, samples) in after.iter().enumerate() {
+        assert!(
+            *samples >= FRAME_SAMPLES,
+            "client {index} lost audio after a participant left ({samples} samples)"
+        );
+    }
+
+    for controller in &controllers {
+        controller.send(VoiceCommand::Stop);
+    }
+    for client in &clients {
+        let _ = client.disconnect();
+    }
+    drop(clients);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server_task.abort();
 }

@@ -61,6 +61,7 @@ input. The process tree includes `conhost.exe`; the app alone is slightly below 
 | Rust desktop in a 2-person voice call, idle microphone | 114.6 MB | 110.9 MB | 1.9% |
 | VP8 720p10 encode/decode (pure Rust) | — | — | 14.1 / 3.6 ms per frame |
 | Screen-share sender, 4K monitor → 720p10 | 133.4 MB | 184.7 MB | 13.4% |
+| Rust desktop in a 4-person voice mesh (measured client) | 117.8 MB | 142.0 MB | 2.2% |
 
 The 50k-vs-0 delta (+8 MB) shows the list virtualizes. The texture spike's private bytes include
 the eight D3D11 textures and the Direct2D composition surfaces; the working set is the visible

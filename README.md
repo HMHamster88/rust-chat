@@ -14,14 +14,12 @@ coturn, unchanged.
 
 ## Status
 
-**M3 complete — voice and screen sharing.** The FerroUI/Direct2D client joins a room's voice
-mesh with one WebRTC/Opus connection per member, echo cancellation/noise suppression/AGC from the
-pure-Rust Sonora port of WebRTC APM, a jitter buffer and automatic reconnection. Screen sharing
-captures a monitor with Windows Graphics Capture, encodes **VP8 with a pure-Rust encoder**, and
-presents the remote frame through Direct2D without a CPU readback. Two real clients exchange
-voice through the server's signal relay in an integration test, and a UI smoke test shows the
-shared desktop arriving at 1280×720. Next is M4 (mesh polish, ICE restart, TURN). Settings-screen
-polish, the update checker and device pickers remain for their milestones.
+**M4 complete — mesh polish.** Calls use the server's TURN credentials, rebuild lost peer
+connections with capped backoff, request keyframes when the VP8 decoder loses its reference, show
+per-peer RTT/relay labels, and rejoin the call automatically after a control-plane reconnect. A
+4-client mesh keeps talking through churn in both an integration test and the real UI. Next is
+**M5: remote control** (screen sharing itself shipped with M3) plus the monitor/window picker,
+resolution settings and device pickers.
 
 Protocol v2 is intentionally **not** compatible with the Kotlin clients. The Kotlin repository is
 the feature specification, not a runtime peer.

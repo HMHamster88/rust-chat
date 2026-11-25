@@ -23,8 +23,12 @@ fn screen_pattern(width: u32, height: u32, frame: u32) -> Vec<u8> {
 
 #[tokio::test]
 async fn two_peers_exchange_vp8_frames() {
-    let mut a = VoicePeer::new("127.0.0.1:0").await.expect("peer A");
-    let mut b = VoicePeer::new("127.0.0.1:0").await.expect("peer B");
+    let mut a = VoicePeer::new("127.0.0.1:0", Vec::new())
+        .await
+        .expect("peer A");
+    let mut b = VoicePeer::new("127.0.0.1:0", Vec::new())
+        .await
+        .expect("peer B");
 
     let offer = a.create_offer().await.expect("offer");
     let answer = b.accept_offer(&offer).await.expect("answer");
