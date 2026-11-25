@@ -12,6 +12,8 @@ use std::time::Duration;
 
 pub const REPO: &str = "HMHamster88/rust-chat";
 const API: &str = "https://api.github.com/repos";
+/// Assets are `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz`; the suffix also matches the older
+/// `rust-chat-vX.Y.Z-...` names, so a 0.1.x server can still update itself.
 const ASSET_SUFFIX: &str = "-linux-x86_64.tar.gz";
 pub const UNIT: &str = "rust-chat-server";
 

@@ -3,6 +3,19 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [Unreleased]
+
+### Changed
+
+- Release assets state what they are: `rust-chat-desktop-vX.Y.Z-windows-x64.zip` for the Windows
+  client and `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` for the server. The release body lists
+  both. The server updater still accepts the older `rust-chat-vX.Y.Z-...` names.
+
+### Fixed
+
+- `init` set the TLS key permissions before writing the key, so every fresh Linux install failed
+  with `No such file or directory` (0.1.3 only).
+
 ## [0.1.3] — 2026-11-25
 
 ### Added
@@ -12,7 +25,6 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
   are checked against GitHub's release asset digest and the tarball's `SHA256SUMS.txt`.
 - `init --dir <dir> --data-dir <dir>` for the `/etc/rust-chat` + `/var/lib/rust-chat` layout, and
   `--password-file` for unattended provisioning.
-- Fixed `init` writing the TLS key permissions before the key existed (Linux-only failure).
 
 ### Notes
 

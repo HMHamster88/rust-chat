@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/HMHamster88/rust-chat/main/scripts/
 The installer:
 
 1. checks root, x86_64 and Ubuntu/Debian;
-2. downloads the latest `rust-chat-vX.Y.Z-linux-x86_64.tar.gz` release, verifies it against the
+2. downloads the latest `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` release, verifies it against the
    `sha256:` digest that GitHub reports for the release asset, then verifies the
    `rust-chat-server` SHA-256 from `SHA256SUMS.txt` inside it;
 3. creates the `rust-chat` system user, `/etc/rust-chat` and `/var/lib/rust-chat`;
@@ -121,7 +121,7 @@ provider firewall.
 
 ```bash
 # binary only, no service
-tar -xzf rust-chat-v0.1.2-linux-x86_64.tar.gz
+tar -xzf rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz
 sudo install -m 0755 rust-chat-server /usr/local/bin/
 rust-chat-server init --config /etc/rust-chat/server.toml \
   --dir /etc/rust-chat --data-dir /var/lib/rust-chat

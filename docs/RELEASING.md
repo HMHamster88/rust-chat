@@ -21,11 +21,12 @@ artifacts to a GitHub Release. The in-app updater reads
    git push origin main
    git push origin v0.1.0
    ```
-6. The workflow produces:
-   - `rust-chat-vX.Y.Z-windows-x64.zip` — `rust-chat.exe`, README and `SHA256SUMS.txt`
-   - `rust-chat-vX.Y.Z-linux-x86_64.tar.gz` — the server and checksums
-6. Verify the Release page has both assets and that `rust-chat` reports “up to date” (or the
-   new version) from the About row.
+6. The workflow produces (asset names state which side they are):
+   - `rust-chat-desktop-vX.Y.Z-windows-x64.zip` — `rust-chat.exe`, README and `SHA256SUMS.txt`
+   - `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` — `rust-chat-server`, README and `SHA256SUMS.txt`
+7. Verify the Release page has both assets, that the release body lists them, and that
+   `rust-chat` reports “up to date” (or the new version) from the About row. For the server,
+   `sudo rust-chat-server update --check` must report the same tag.
 
 ## Notes
 

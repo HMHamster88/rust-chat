@@ -47,7 +47,7 @@ jobs:
         if: steps.prebuilt.outputs.run_id != ''
         uses: actions/download-artifact@v4
         with:
-          name: rust-chat-windows-client
+          name: rust-chat-desktop-windows-client
           path: prebuilt
           run-id: ${{ steps.prebuilt.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -69,12 +69,12 @@ jobs:
             "$hash  $($file.Name)"
           }
           Set-Content dist/SHA256SUMS.txt $lines
-          Compress-Archive -Path dist/* -DestinationPath "rust-chat-$($env:GITHUB_REF_NAME)-windows-x64.zip"
+          Compress-Archive -Path dist/* -DestinationPath "rust-chat-desktop-$($env:GITHUB_REF_NAME)-windows-x64.zip"
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: rust-chat-*-windows-x64.zip
+          files: rust-chat-desktop-*-windows-x64.zip
           generate_release_notes: true
 
   linux-server:
@@ -104,10 +104,21 @@ jobs:
           cp README.md dist/
           cd dist
           sha256sum rust-chat-server > SHA256SUMS.txt
-          tar -czf "../rust-chat-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" *
+          tar -czf "../rust-chat-server-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" *
 
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
-          files: rust-chat-*-linux-x86_64.tar.gz
+          files: rust-chat-server-*-linux-x86_64.tar.gz
+          body: |
+            **Assets**
+
+            | File | Contents |
+            |---|---|
+            | `rust-chat-desktop-*-windows-x64.zip` | Windows desktop client (`rust-chat.exe`, portable) |
+            | `rust-chat-server-*-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`) |
+
+            Install the server on Ubuntu/Debian with
+            `curl -fsSL https://raw.githubusercontent.com/HMHamster88/rust-chat/main/scripts/install-server.sh | sudo bash`.
+            See [docs/SERVER_DEPLOY.md](https://github.com/HMHamster88/rust-chat/blob/main/docs/SERVER_DEPLOY.md).
           generate_release_notes: true

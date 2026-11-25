@@ -89,7 +89,7 @@ fi
 TAG_FROM_API="$(jq -r '.tag_name // empty' "$META" 2>/dev/null || true)"
 TAG="${TAG_FROM_API:-${TAG:-}}"
 [[ -n "${TAG:-}" ]] || die "could not determine a release tag"
-ARCHIVE="rust-chat-${TAG}-linux-x86_64.tar.gz"
+ARCHIVE="rust-chat-server-${TAG}-linux-x86_64.tar.gz"
 URL_PREFIX="${RUST_CHAT_URL_PREFIX:-https://github.com/$REPO/releases/download}"
 URL="${URL_PREFIX%/}/$TAG/$ARCHIVE"
 

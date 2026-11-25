@@ -17,10 +17,17 @@ coturn, unchanged.
 
 ## Download
 
-- **Windows (portable):** [rust-chat-v0.1.3-windows-x64.zip](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.3/rust-chat-v0.1.3-windows-x64.zip)
-  — `rust-chat.exe`, README and SHA-256 sums.
-- **Linux server:** [rust-chat-v0.1.3-linux-x86_64.tar.gz](https://github.com/HMHamster88/rust-chat/releases/download/v0.1.3/rust-chat-v0.1.3-linux-x86_64.tar.gz)
+Pick the asset that matches what you want to run — every release contains exactly these two:
 
+| Asset | What it is |
+|---|---|
+| `rust-chat-desktop-vX.Y.Z-windows-x64.zip` | Windows desktop client (`rust-chat.exe`, portable) |
+| `rust-chat-server-vX.Y.Z-linux-x86_64.tar.gz` | Linux server (`rust-chat-server`) |
+
+- **Latest release:** https://github.com/HMHamster88/rust-chat/releases/latest
+- **Linux server install:** see [Server on a VPS](#server-on-a-vps) below (one command).
+
+Assets from 0.1.3 and earlier were named `rust-chat-vX.Y.Z-...`; they contain the same two things.
 The Windows server is a development tool and is not part of the Windows release. Windows artifacts
 are built once on `main` and reused by tagged releases, so a release takes about two minutes when
 the main build is green. Binaries are unsigned, so Windows SmartScreen may warn. The app checks

@@ -41,7 +41,7 @@ jobs:
       - name: Upload client
         uses: actions/upload-artifact@v4
         with:
-          name: rust-chat-windows-client
+          name: rust-chat-desktop-windows-client
           path: target/release/rust-chat.exe
           if-no-files-found: error
           retention-days: 90
