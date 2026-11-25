@@ -127,6 +127,42 @@ async fn history_and_transcript_preferences_apply_live() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn seeded_history_is_restored_on_join() {
+    let (address, server_task) = start_server().await;
+    let dir = root("restore");
+    let endpoint = format!("127.0.0.1:{}", address.port());
+    let store = HistoryStore::at(dir.clone());
+    store
+        .append(
+            &endpoint,
+            "lobby",
+            &rust_chat_protocol::ChatMessage {
+                message_id: "seeded-1".into(),
+                room_id: "lobby".into(),
+                from: "someone".into(),
+                name: "alice".into(),
+                text: "restored from disk".into(),
+                ts: 1_700_000_000_000,
+                client_msg_id: None,
+            },
+        )
+        .unwrap();
+
+    let client = connect(address, "alice", &dir).await;
+    let snapshot = wait_for(&client, |snapshot| {
+        snapshot
+            .messages
+            .iter()
+            .any(|message| message.text == "restored from disk")
+    })
+    .await;
+    assert_eq!(snapshot.messages.len(), 1);
+
+    server_task.abort();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn file_preferences_route_downloads_and_open_flag() {
     let dir = std::env::temp_dir().join(format!("rust-chat-fileprefs-{}", std::process::id()));

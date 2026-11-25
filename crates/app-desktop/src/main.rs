@@ -6,7 +6,6 @@
 mod icons;
 mod ui_kit;
 
-use ferroui_base::collections::FerroList;
 use ferroui_base::input::{
     InputElement, Key, KeyEventArgs, PointerEventArgs, PointerPressedEventArgs,
     PointerReleasedEventArgs, PointerWheelEventArgs,
@@ -21,9 +20,8 @@ use ferroui_base::{
 use ferroui_controls::primitives::ScrollBarVisibility;
 use ferroui_controls::{
     AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Border, Button, CheckBox,
-    ColumnDefinition, ColumnDefinitions, Control, Grid, GridLength, GridUnitType, ItemsSource,
-    ListBox, NewApplication, RowDefinition, RowDefinitions, ScrollViewer, StackPanel, TextBlock,
-    TextBox, Window,
+    ColumnDefinition, ColumnDefinitions, Control, Grid, GridLength, GridUnitType, NewApplication,
+    RowDefinition, RowDefinitions, ScrollViewer, StackPanel, TextBlock, TextBox, Window,
 };
 use ferroui_desktop::AppBuilderDesktopExtensions;
 use ferroui_media::MediaSubscription;
@@ -232,7 +230,8 @@ struct Ui {
     members_panel: Ref<StackPanel>,
     members_sig: RefCell<String>,
     rooms_panel: Ref<StackPanel>,
-    message_model: Rc<FerroList<String>>,
+    feed_panel: Ref<StackPanel>,
+    feed_scroll: Ref<ScrollViewer>,
     composer: Ref<TextBox>,
     last_rooms: RefCell<String>,
     last_messages: RefCell<String>,
@@ -1657,10 +1656,12 @@ fn create_main_window() -> Ref<Window> {
     let video_label = text("SCREEN SHARE", 12.0);
     video_label.set_is_visible(false);
 
-    let message_model = Rc::new(FerroList::new());
-    let message_list = ListBox::new();
-    message_list.set_items_source(Some(ItemsSource::from(message_model.clone())));
-    message_list.set_vertical_alignment(VerticalAlignment::Stretch);
+    let feed_panel = StackPanel::new();
+    feed_panel.set_spacing(10.0);
+    let feed_scroll = ScrollViewer::new();
+    feed_scroll.set_vertical_scroll_bar_visibility(ScrollBarVisibility::Auto);
+    feed_scroll.set_horizontal_scroll_bar_visibility(ScrollBarVisibility::Disabled);
+    feed_scroll.set_content(Some(Control::boxed(feed_panel.clone())));
     let composer = TextBox::new();
     composer.set_accepts_return(false);
     composer.set_horizontal_alignment(HorizontalAlignment::Stretch);
@@ -1842,7 +1843,7 @@ fn create_main_window() -> Ref<Window> {
         right: 14.0,
         bottom: 0.0,
     });
-    feed_frame.set_child(&message_list);
+    feed_frame.set_child(&feed_scroll);
 
     let composer_frame = Border::new();
     composer_frame.set_padding(Thickness {
@@ -1970,7 +1971,8 @@ fn create_main_window() -> Ref<Window> {
         members_panel,
         members_sig: RefCell::new(String::new()),
         rooms_panel,
-        message_model,
+        feed_panel,
+        feed_scroll,
         composer,
         last_rooms: RefCell::new(String::new()),
         last_messages: RefCell::new(String::new()),
@@ -2768,11 +2770,30 @@ fn refresh(ui: &Rc<Ui>) {
             *ui.last_rooms.borrow_mut() = rooms_signature;
             ui.rooms_panel.children().clear();
             for summary in &snapshot.rooms {
+                let active = summary.id == room.room.id;
+                let hash = ui_kit::muted("#", 13.0);
+                let name = ui_kit::body(&summary.name, 13.0);
+                let count = ui_kit::muted(&summary.member_count.to_string(), 11.5);
+                let row_grid = Grid::new();
+                row_grid.set_column_definitions(ColumnDefinitions::from_items([
+                    ColumnDefinition::with_width(GridLength::AUTO),
+                    ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+                    ColumnDefinition::with_width(GridLength::AUTO),
+                ]));
+                Grid::set_column(&hash, 0);
+                Grid::set_column(&name, 1);
+                Grid::set_column(&count, 2);
+                row_grid.children().add(&hash);
+                row_grid.children().add(&name);
+                row_grid.children().add(&count);
+
                 let button = Button::new();
-                button.set_content(Some(Rc::new(format!(
-                    "{} ({})",
-                    summary.name, summary.member_count
-                ))));
+                button.set_content(Some(Rc::new(row_grid) as ferroui_base::BoxedValue));
+                button.set_horizontal_content_alignment(HorizontalAlignment::Stretch);
+                button.set_horizontal_alignment(HorizontalAlignment::Stretch);
+                if active {
+                    button.set_background(Some(ui_kit::brush(ui_kit::SOFT)));
+                }
                 let weak = Rc::downgrade(ui);
                 let room_id = summary.id.clone();
                 button.click(move |_, _| {
@@ -2803,16 +2824,64 @@ fn refresh(ui: &Rc<Ui>) {
         );
         if *ui.last_messages.borrow() != messages_signature {
             *ui.last_messages.borrow_mut() = messages_signature;
-            ui.message_model.clear();
-            for message in snapshot.messages.iter().rev() {
-                let stamp = if appearance.0 {
-                    format!("[{}] ", local_clock(message.ts, appearance.1))
-                } else {
-                    String::new()
-                };
-                ui.message_model
-                    .add(format!("{stamp}{}: {}", message.name, message.text));
+            ui.feed_panel.children().clear();
+            if snapshot.messages.is_empty() {
+                ui.feed_panel
+                    .children()
+                    .add(ui_kit::muted("No messages yet.", 12.0));
             }
+            let self_id = room.self_member.session_id.clone();
+            let shown = snapshot.messages.len().saturating_sub(200);
+            for message in snapshot.messages.iter().skip(shown) {
+                let own = message.from == self_id;
+                let header = if appearance.0 {
+                    format!(
+                        "{} · {}",
+                        message.name,
+                        local_clock(message.ts, appearance.1)
+                    )
+                } else {
+                    message.name.clone()
+                };
+                let who = ui_kit::muted(&header, 11.0);
+                let text = ui_kit::body(&message.text, 13.5);
+                text.set_text_wrapping(ferroui_base::media::TextWrapping::Wrap);
+                text.set_max_width(520.0);
+                let bubble_inner = StackPanel::new();
+                bubble_inner.set_spacing(3.0);
+                bubble_inner.children().add(&who);
+                bubble_inner.children().add(&text);
+                let bubble = Border::new();
+                bubble.set_background(Some(ui_kit::brush(if own {
+                    0xFFEE_F4FB
+                } else {
+                    ui_kit::CARD
+                })));
+                bubble.set_border_brush(Some(ui_kit::brush(if own {
+                    0xFFCF_E2F7
+                } else {
+                    ui_kit::STROKE
+                })));
+                bubble.set_border_thickness(Thickness::uniform(1.0));
+                bubble.set_corner_radius(CornerRadius::uniform(10.0));
+                bubble.set_padding(Thickness {
+                    left: 12.0,
+                    top: 7.0,
+                    right: 12.0,
+                    bottom: 7.0,
+                });
+                bubble.set_child(&bubble_inner);
+                bubble.set_horizontal_alignment(if own {
+                    HorizontalAlignment::Right
+                } else {
+                    HorizontalAlignment::Left
+                });
+                let line = StackPanel::new();
+                line.set_horizontal_alignment(HorizontalAlignment::Stretch);
+                line.children().add(&bubble);
+                ui.feed_panel.children().add(&line);
+            }
+            ui.feed_scroll.scroll_to_end();
         }
     } else {
         ui.last_rooms.borrow_mut().clear();
