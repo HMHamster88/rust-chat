@@ -590,7 +590,6 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.share_quality.set_is_visible(active);
     ui.file_panel.set_is_visible(active);
     ui.file_card.set_is_visible(active);
-    ui.share_card.set_is_visible(active);
     if active {
         ui.refresh_file_members(room);
     }

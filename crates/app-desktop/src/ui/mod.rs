@@ -126,7 +126,6 @@ struct Ui {
     pub(crate) room_view: Ref<Grid>,
     pub(crate) stage_frame: Ref<Border>,
     pub(crate) file_card: Ref<Border>,
-    pub(crate) share_card: Ref<Border>,
     pub(crate) server_line: Ref<TextBlock>,
     pub(crate) settings_nav: Ref<Button>,
     pub(crate) disconnect_nav: Ref<Button>,
@@ -694,7 +693,7 @@ impl Ui {
             .set_text(Some(&format!("Received files go to {downloads}")));
         screen
             .about_version
-            .set_text(Some(&format!("rust-chat {APP_VERSION}")));
+            .set_text(Some(&format!("Rust Chat {APP_VERSION}")));
         screen.about_data.set_text(Some(&format!(
             "Settings and history: {}",
             rust_chat_client_core::settings::app_dir().display()
@@ -1119,6 +1118,7 @@ struct SettingsScreen {
     sections: Vec<Ref<StackPanel>>,
     section: Cell<usize>,
     danger_bar: Ref<Border>,
+    about_slot: Ref<StackPanel>,
     open_room: Ref<Button>,
     open_connect: Ref<Button>,
     close: Ref<Button>,

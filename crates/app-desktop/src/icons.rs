@@ -10,7 +10,7 @@
 use ferroui_base::Ref;
 use ferroui_base::media::{FontFamily, FontManager, FontSimulations};
 use ferroui_controls::automation::AutomationProperties;
-use ferroui_controls::{Button, StackPanel, TextBlock};
+use ferroui_controls::{Button, StackPanel, TextBlock, ToolTip};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -133,14 +133,23 @@ pub fn icon(glyph: Icon, size: f64) -> Ref<TextBlock> {
     block
 }
 
-/// A square, borderless button that shows only the glyph. `name` is its automation name.
+/// A square button that shows only the glyph, with a tooltip and an automation name.
 pub fn icon_button(glyph: Icon, name: &str) -> Ref<Button> {
     let button = Button::new();
-    let content: ferroui_base::BoxedValue = Rc::new(icon(glyph, 16.0));
-    button.set_content(Some(content));
+    let content = icon(glyph, 16.0);
+    content.set_horizontal_alignment(ferroui_base::layout::HorizontalAlignment::Center);
+    content.set_vertical_alignment(ferroui_base::layout::VerticalAlignment::Center);
+    button.set_content(Some(Rc::new(content) as ferroui_base::BoxedValue));
     button.set_width(32.0);
     button.set_height(32.0);
+    button.set_padding(ferroui_base::Thickness::uniform(0.0));
+    button.set_horizontal_content_alignment(ferroui_base::layout::HorizontalAlignment::Center);
+    button.set_vertical_content_alignment(ferroui_base::layout::VerticalAlignment::Center);
     AutomationProperties::set_name(&button, Some(name));
+    AutomationProperties::set_help_text(&button, Some(name));
+    let tip = ToolTip::new();
+    tip.set_content(Some(Rc::new(name.to_owned())));
+    button.set_value(ToolTip::tool_tip_property(), Some(tip));
     button
 }
 

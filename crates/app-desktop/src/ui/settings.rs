@@ -301,6 +301,7 @@ pub(super) fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen
         sections,
         section: Cell::new(0),
         danger_bar: danger_bar.clone(),
+        about_slot: about.clone(),
         open_room,
         open_connect,
         close,

@@ -5,6 +5,19 @@ All notable changes to rust-chat. The format follows Keep a Changelog; versions 
 
 ## [Unreleased]
 
+### Changed
+
+- The room has no right-hand rail any more: voice mute controls and the sharing
+  source/quality/remote-control row sit in a toolbar under the header, the files panel sits above
+  the composer, and the update check moved into Settings → About.
+- User-visible product name is "Rust Chat" (window title, brand panel, sidebar, About).
+- Icon-only buttons are centred and carry a tooltip plus an automation name and help text.
+
+### Fixed
+
+- The Display name and Password fields line up with their labels instead of being centred in the
+  connect card.
+
 ### Added
 
 - Material Design Icons: a 4.7 KB subset is bundled in the executable and registered from memory; the

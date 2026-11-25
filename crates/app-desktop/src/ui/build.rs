@@ -54,11 +54,12 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     let update_row = row();
     update_row
         .children()
-        .add(text(&format!("rust-chat {APP_VERSION}"), 12.0));
+        .add(text(&format!("Rust Chat {APP_VERSION}"), 12.0));
     update_row.children().add(update_check.clone());
     update_row.children().add(update_open.clone());
     update_row.children().add(update_auto.clone());
     update_row.children().add(update_status.clone());
+    settings_screen.about_slot.children().add(&update_row);
     let (update_tx, update_rx) = std::sync::mpsc::channel();
     if settings.check_for_updates {
         let tx = update_tx.clone();
@@ -86,6 +87,9 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     port.set_width(80.0);
     name.set_width(340.0);
     password_box.set_width(340.0);
+    for field in [&host, &port, &name, &password_box] {
+        field.set_horizontal_alignment(HorizontalAlignment::Left);
+    }
     tls.set_content(Some(Rc::new(String::new())));
     remember.set_content(Some(Rc::new(String::new())));
     let connect_label = ui_kit::body("Connect", 13.5);
@@ -103,7 +107,7 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     brand_glyph.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
     brand_mark.set_child(&brand_glyph);
 
-    let brand_title = text("rust-chat", 28.0);
+    let brand_title = text("Rust Chat", 28.0);
     brand_title.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
     let brand_tag = ui_kit::muted(
         "Self-hosted chat with voice, screen sharing and peer-to-peer files. Your server, your data.",
@@ -376,7 +380,7 @@ pub(crate) fn create_main_window() -> Ref<Window> {
 
     let brand_text = StackPanel::new();
     brand_text.set_spacing(1.0);
-    brand_text.children().add(ui_kit::body("rust-chat", 14.0));
+    brand_text.children().add(ui_kit::body("Rust Chat", 14.0));
     let server_line = ui_kit::muted("", 11.0);
     brand_text.children().add(&server_line);
     let brand_row = ui_kit::row(9.0);
@@ -496,80 +500,61 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     });
     composer_frame.set_child(&composer_row);
 
+    // ---- secondary toolbar: voice and sharing controls ----
+    let toolbar = ui_kit::row(10.0);
+    toolbar.children().add(&mute_mic);
+    toolbar.children().add(&mute_speaker);
+    toolbar.children().add(&voice_status);
+    toolbar.children().add(&share_row);
+    toolbar.children().add(&control_row);
+    let toolbar_frame = Border::new();
+    toolbar_frame.set_padding(Thickness {
+        left: 14.0,
+        top: 6.0,
+        right: 14.0,
+        bottom: 6.0,
+    });
+    toolbar_frame.set_child(&toolbar);
+
+    let file_card = ui_kit::card(&file_panel, 10.0);
+    file_card.set_margin(Thickness {
+        left: 14.0,
+        top: 8.0,
+        right: 14.0,
+        bottom: 0.0,
+    });
+
     let centre = Grid::new();
     centre.set_row_definitions(RowDefinitions::from_items([
         RowDefinition::with_height(GridLength::AUTO),
         RowDefinition::with_height(GridLength::AUTO),
+        RowDefinition::with_height(GridLength::AUTO),
         RowDefinition::with_height(GridLength::new(1.0, GridUnitType::Star)),
+        RowDefinition::with_height(GridLength::AUTO),
         RowDefinition::with_height(GridLength::AUTO),
     ]));
     Grid::set_row(&header_frame, 0);
-    Grid::set_row(&stage_frame, 1);
-    Grid::set_row(&feed_frame, 2);
-    Grid::set_row(&composer_frame, 3);
+    Grid::set_row(&toolbar_frame, 1);
+    Grid::set_row(&stage_frame, 2);
+    Grid::set_row(&feed_frame, 3);
+    Grid::set_row(&file_card, 4);
+    Grid::set_row(&composer_frame, 5);
     centre.children().add(&header_frame);
+    centre.children().add(&toolbar_frame);
     centre.children().add(&stage_frame);
     centre.children().add(&feed_frame);
+    centre.children().add(&file_card);
     centre.children().add(&composer_frame);
-
-    // ---- right rail: voice, files, sharing, about ----
-    let voice_panel = StackPanel::new();
-    voice_panel.set_spacing(8.0);
-    voice_panel.children().add(ui_kit::section_label("VOICE"));
-    voice_panel.children().add(&voice_status);
-    let voice_buttons = ui_kit::row(6.0);
-    voice_buttons.children().add(&mute_mic);
-    voice_buttons.children().add(&mute_speaker);
-    voice_panel.children().add(&voice_buttons);
-
-    let share_panel = StackPanel::new();
-    share_panel.set_spacing(8.0);
-    share_panel.children().add(ui_kit::section_label("SHARING"));
-    share_panel.children().add(&share_row);
-    share_panel.children().add(&control_row);
-
-    let about_panel = StackPanel::new();
-    about_panel.set_spacing(8.0);
-    about_panel.children().add(ui_kit::section_label("ABOUT"));
-    about_panel.children().add(&update_row);
-
-    let rail = StackPanel::new();
-    rail.set_spacing(10.0);
-    rail.children().add(ui_kit::card(&voice_panel, 12.0));
-    let file_card = ui_kit::card(&file_panel, 12.0);
-    rail.children().add(&file_card);
-    let share_card = ui_kit::card(&share_panel, 12.0);
-    rail.children().add(&share_card);
-    rail.children().add(ui_kit::card(&about_panel, 12.0));
-    let rail_frame = Border::new();
-    rail_frame.set_background(Some(ui_kit::brush(ui_kit::RAIL)));
-    rail_frame.set_padding(Thickness {
-        left: 12.0,
-        top: 12.0,
-        right: 12.0,
-        bottom: 12.0,
-    });
-    rail_frame.set_border_brush(Some(ui_kit::brush(ui_kit::STROKE)));
-    rail_frame.set_border_thickness(Thickness {
-        left: 1.0,
-        top: 0.0,
-        right: 0.0,
-        bottom: 0.0,
-    });
-    rail_frame.set_child(&rail);
 
     let room_view = Grid::new();
     room_view.set_column_definitions(ColumnDefinitions::from_items([
         ColumnDefinition::with_width(GridLength::new(236.0, GridUnitType::Pixel)),
         ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
-        ColumnDefinition::with_width(GridLength::new(284.0, GridUnitType::Pixel)),
     ]));
     Grid::set_column(&sidebar_frame, 0);
     Grid::set_column(&centre, 1);
-    Grid::set_column(&rail_frame, 2);
     room_view.children().add(&sidebar_frame);
     room_view.children().add(&centre);
-    room_view.children().add(&rail_frame);
     room_view.set_is_visible(false);
 
     let root = Grid::new();
@@ -594,7 +579,6 @@ pub(crate) fn create_main_window() -> Ref<Window> {
         room_view: room_view.clone(),
         stage_frame: stage_frame.clone(),
         file_card: file_card.clone(),
-        share_card: share_card.clone(),
         server_line: server_line.clone(),
         settings_nav: settings_nav_button.clone(),
         disconnect_nav: disconnect_nav_button.clone(),
@@ -719,7 +703,7 @@ pub(crate) fn create_main_window() -> Ref<Window> {
     }
 
     let window = Window::new();
-    window.set_title(Some(format!("rust-chat {APP_VERSION}")));
+    window.set_title(Some(format!("Rust Chat {APP_VERSION}")));
     let area = work_area();
     let scale = system_scale();
     let height = area
