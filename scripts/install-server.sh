@@ -19,7 +19,8 @@ CONFIG_DIR="${RUST_CHAT_CONFIG_DIR:-/etc/rust-chat}"
 DATA_DIR="${RUST_CHAT_DATA_DIR:-/var/lib/rust-chat}"
 BIN="${RUST_CHAT_BIN:-/usr/local/bin/rust-chat-server}"
 SERVICE="rust-chat-server"
-VERSION="${RUST_CHAT_VERSION:-latest}"
+# Note: `/etc/os-release` defines VERSION and ID, so keep the overrides in distinct names.
+RELEASE="${RUST_CHAT_VERSION:-latest}"
 PORT="${RUST_CHAT_PORT:-8444}"
 TURN="${RUST_CHAT_TURN:-ask}"
 AUTO_UPDATE="${RUST_CHAT_AUTO_UPDATE:-ask}"
@@ -75,12 +76,12 @@ META="$TMP/release.json"
 if [[ -n "${RUST_CHAT_RELEASE_JSON:-}" ]]; then
     log "using release metadata from $RUST_CHAT_RELEASE_JSON"
     cp "$RUST_CHAT_RELEASE_JSON" "$META"
-elif [[ "$VERSION" == "latest" ]]; then
+elif [[ "$RELEASE" == "latest" ]]; then
     log "looking up the latest release"
     curl -fsSL -H 'User-Agent: rust-chat-installer' \
         "https://api.github.com/repos/$REPO/releases/latest" -o "$META"
 else
-    TAG="v${VERSION#v}"
+    TAG="v${RELEASE#v}"
     log "looking up release $TAG"
     curl -fsSL -H 'User-Agent: rust-chat-installer' \
         "https://api.github.com/repos/$REPO/releases/tags/$TAG" -o "$META" \

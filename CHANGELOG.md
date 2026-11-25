@@ -3,6 +3,15 @@
 All notable changes to rust-chat. The format follows Keep a Changelog; versions are
 `major.minor.patch` and tags are `vX.Y.Z`.
 
+## [Unreleased]
+
+### Fixed
+
+- `scripts/install-server.sh`: the `RUST_CHAT_VERSION` override was stored in `VERSION`, which
+  `/etc/os-release` overwrites, so the one-liner could not resolve a release tag. The script keeps
+  its own `RELEASE` variable now. The one-liner reads the script from `main`, so this is fixed
+  without a release; `RUST_CHAT_VERSION=v0.1.4` works too.
+
 ## [0.1.4] — 2026-11-25
 
 ### Changed
