@@ -15,11 +15,15 @@ use ferroui_base::interactivity::RoutedEventHandlerToken;
 use ferroui_base::layout::{HorizontalAlignment, Orientation, VerticalAlignment};
 use ferroui_base::media::Brushes;
 use ferroui_base::threading::{DispatcherPriority, DispatcherTimer};
-use ferroui_base::{FerroObjectImpl, Ref, Thickness, ferro_class, ferro_impl_classes, instantiate};
+use ferroui_base::{
+    CornerRadius, FerroObjectImpl, Ref, Thickness, ferro_class, ferro_impl_classes, instantiate,
+};
 use ferroui_controls::primitives::ScrollBarVisibility;
 use ferroui_controls::{
-    AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Button, CheckBox, Control, Grid,
-    ItemsSource, ListBox, NewApplication, ScrollViewer, StackPanel, TextBlock, TextBox, Window,
+    AppBuilder, Application, ApplicationImpl, ApplicationImplExt, Border, Button, CheckBox,
+    ColumnDefinition, ColumnDefinitions, Control, Grid, GridLength, GridUnitType, ItemsSource,
+    ListBox, NewApplication, RowDefinition, RowDefinitions, ScrollViewer, StackPanel, TextBlock,
+    TextBox, Window,
 };
 use ferroui_desktop::AppBuilderDesktopExtensions;
 use ferroui_media::MediaSubscription;
@@ -206,7 +210,13 @@ struct Ui {
     runtime: tokio::runtime::Handle,
     settings: RefCell<ClientSettings>,
     connect_panel: Ref<StackPanel>,
-    room_panel: Ref<StackPanel>,
+    room_view: Ref<Grid>,
+    stage_frame: Ref<Border>,
+    file_card: Ref<Border>,
+    share_card: Ref<Border>,
+    server_line: Ref<TextBlock>,
+    settings_nav: Ref<Button>,
+    disconnect_nav: Ref<Button>,
     host: Ref<TextBox>,
     port: Ref<TextBox>,
     name: Ref<TextBox>,
@@ -219,7 +229,8 @@ struct Ui {
     trust_text: Ref<TextBlock>,
     room_title: Ref<TextBlock>,
     room_status: Ref<TextBlock>,
-    members: Ref<TextBlock>,
+    members_panel: Ref<StackPanel>,
+    members_sig: RefCell<String>,
     rooms_panel: Ref<StackPanel>,
     message_model: Rc<FerroList<String>>,
     composer: Ref<TextBox>,
@@ -1567,11 +1578,13 @@ fn create_main_window() -> Ref<Window> {
     actions.children().add(settings_screen.open_connect.clone());
     connect_panel.children().add(actions);
     connect_panel.children().add(connect_status.clone());
+    connect_panel.children().add(error_text.clone());
     connect_panel.children().add(trust_panel.clone());
 
     let room_title = text("", 20.0);
     let room_status = text("", 13.0);
-    let members = text("", 13.0);
+    let members_panel = StackPanel::new();
+    members_panel.set_spacing(2.0);
     let rooms_panel = StackPanel::new();
     rooms_panel.set_spacing(4.0);
     let join_voice = icons::icon_button(icons::Icon::Microphone, "Join voice");
@@ -1625,13 +1638,6 @@ fn create_main_window() -> Ref<Window> {
     control_row.children().add(deny_control.clone());
     control_row.children().add(control_status.clone());
     let voice_status = text("voice: off", 13.0);
-    let voice_row = row();
-    voice_row.children().add(join_voice.clone());
-    voice_row.children().add(leave_voice.clone());
-    voice_row.children().add(mute_mic.clone());
-    voice_row.children().add(mute_speaker.clone());
-    voice_row.children().add(share.clone());
-    voice_row.children().add(voice_status.clone());
 
     let surface = Rc::new(RefCell::new(
         VideoSurface::new().expect("the Direct2D video surface must be available"),
@@ -1654,14 +1660,20 @@ fn create_main_window() -> Ref<Window> {
     let message_model = Rc::new(FerroList::new());
     let message_list = ListBox::new();
     message_list.set_items_source(Some(ItemsSource::from(message_model.clone())));
-    message_list.set_height(360.0);
+    message_list.set_vertical_alignment(VerticalAlignment::Stretch);
     let composer = TextBox::new();
     composer.set_accepts_return(false);
-    composer.set_width(760.0);
+    composer.set_horizontal_alignment(HorizontalAlignment::Stretch);
     let send = icons::icon_button(icons::Icon::Send, "Send message");
-    let composer_row = row();
-    composer_row.children().add(composer.clone());
-    composer_row.children().add(send.clone());
+    let composer_row = Grid::new();
+    composer_row.set_column_definitions(ColumnDefinitions::from_items([
+        ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+        ColumnDefinition::with_width(GridLength::AUTO),
+    ]));
+    Grid::set_column(&composer, 0);
+    Grid::set_column(&send, 1);
+    composer_row.children().add(&composer);
+    composer_row.children().add(&send);
 
     let file_members = StackPanel::new();
     file_members.set_orientation(Orientation::Horizontal);
@@ -1707,41 +1719,223 @@ fn create_main_window() -> Ref<Window> {
     file_panel.set_is_visible(false);
 
     let disconnect = icons::icon_button(icons::Icon::Disconnect, "Disconnect");
-    let room_actions = row();
-    room_actions.children().add(disconnect.clone());
-    room_actions
+    let open_settings_room = settings_screen.open_room.clone();
+
+    // ---- sidebar: brand, rooms, members, navigation ----
+    let room_mark = Border::new();
+    room_mark.set_width(30.0);
+    room_mark.set_height(30.0);
+    room_mark.set_background(Some(ui_kit::brush(ui_kit::ACCENT)));
+    room_mark.set_corner_radius(CornerRadius::uniform(8.0));
+    let mark_glyph = icons::icon(icons::Icon::Chat, 16.0);
+    mark_glyph.set_foreground(Some(ui_kit::brush(0xFFFF_FFFF)));
+    room_mark.set_child(&mark_glyph);
+
+    let brand_text = StackPanel::new();
+    brand_text.set_spacing(1.0);
+    brand_text.children().add(ui_kit::body("rust-chat", 14.0));
+    let server_line = ui_kit::muted("", 11.0);
+    brand_text.children().add(&server_line);
+    let brand_row = ui_kit::row(9.0);
+    brand_row.children().add(&room_mark);
+    brand_row.children().add(&brand_text);
+
+    let settings_nav = icons::icon_label(icons::Icon::Settings, "Settings");
+    let settings_nav_button = Button::new();
+    settings_nav_button.set_content(Some(Rc::new(settings_nav) as ferroui_base::BoxedValue));
+    let disconnect_nav = icons::icon_label(icons::Icon::Disconnect, "Disconnect");
+    let disconnect_nav_button = Button::new();
+    disconnect_nav_button.set_content(Some(Rc::new(disconnect_nav) as ferroui_base::BoxedValue));
+
+    let sidebar = StackPanel::new();
+    sidebar.set_spacing(6.0);
+    sidebar.children().add(&brand_row);
+    sidebar.children().add(ui_kit::section_label("ROOMS"));
+    sidebar.children().add(&rooms_panel);
+    sidebar
         .children()
-        .add(settings_screen.open_room.clone());
+        .add(ui_kit::section_label("IN THIS ROOM"));
+    sidebar.children().add(&members_panel);
+    sidebar.children().add(ui_kit::divider());
+    sidebar.children().add(&settings_nav_button);
+    sidebar.children().add(&disconnect_nav_button);
+    let sidebar_frame = Border::new();
+    sidebar_frame.set_background(Some(ui_kit::brush(ui_kit::RAIL)));
+    sidebar_frame.set_padding(Thickness {
+        left: 12.0,
+        top: 12.0,
+        right: 12.0,
+        bottom: 12.0,
+    });
+    sidebar_frame.set_border_brush(Some(ui_kit::brush(ui_kit::STROKE)));
+    sidebar_frame.set_border_thickness(Thickness {
+        left: 0.0,
+        top: 0.0,
+        right: 1.0,
+        bottom: 0.0,
+    });
+    sidebar_frame.set_child(&sidebar);
 
-    let room_panel = StackPanel::new();
-    room_panel.set_spacing(10.0);
-    let room_header = row();
-    room_header.children().add(room_title.clone());
-    room_header.children().add(room_status.clone());
-    room_panel.children().add(room_header);
-    room_panel.children().add(room_actions);
-    room_panel.children().add(voice_row);
-    room_panel.children().add(share_row);
-    room_panel.children().add(control_row);
-    room_panel.children().add(text("ROOMS", 12.0));
-    room_panel.children().add(rooms_panel.clone());
-    room_panel.children().add(text("MEMBERS", 12.0));
-    room_panel.children().add(members.clone());
-    room_panel.children().add(video_label.clone());
-    room_panel.children().add(video_host.clone());
-    room_panel.children().add(message_list);
-    room_panel.children().add(composer_row);
-    room_panel.children().add(file_panel.clone());
-    room_panel.set_is_visible(false);
+    // ---- centre: header, stage, feed, composer ----
+    let header_text = StackPanel::new();
+    header_text.set_spacing(2.0);
+    header_text.children().add(&room_title);
+    header_text.children().add(&room_status);
+    let header_actions = ui_kit::row(6.0);
+    header_actions.children().add(&join_voice);
+    header_actions.children().add(&leave_voice);
+    header_actions.children().add(&share);
+    header_actions.children().add(&open_settings_room);
+    header_actions.children().add(&disconnect);
+    let header_grid = Grid::new();
+    header_grid.set_column_definitions(ColumnDefinitions::from_items([
+        ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+        ColumnDefinition::with_width(GridLength::AUTO),
+    ]));
+    Grid::set_column(&header_text, 0);
+    Grid::set_column(&header_actions, 1);
+    header_grid.children().add(&header_text);
+    header_grid.children().add(&header_actions);
+    let header_frame = Border::new();
+    header_frame.set_background(Some(ui_kit::brush(ui_kit::CARD)));
+    header_frame.set_padding(Thickness {
+        left: 14.0,
+        top: 9.0,
+        right: 14.0,
+        bottom: 9.0,
+    });
+    header_frame.set_border_brush(Some(ui_kit::brush(ui_kit::STROKE)));
+    header_frame.set_border_thickness(Thickness {
+        left: 0.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 1.0,
+    });
+    header_frame.set_child(&header_grid);
 
-    let root = StackPanel::new();
+    video_label.set_foreground(Some(ui_kit::brush(0xFFCF_D6E0)));
+    let stage_inner = StackPanel::new();
+    stage_inner.set_spacing(6.0);
+    stage_inner.children().add(&video_label);
+    stage_inner.children().add(&video_host);
+    let stage_frame = Border::new();
+    stage_frame.set_background(Some(ui_kit::brush(0xFF0E_1116)));
+    stage_frame.set_corner_radius(CornerRadius::uniform(10.0));
+    stage_frame.set_padding(Thickness::uniform(8.0));
+    stage_frame.set_margin(Thickness {
+        left: 14.0,
+        top: 10.0,
+        right: 14.0,
+        bottom: 0.0,
+    });
+    stage_frame.set_child(&stage_inner);
+
+    let feed_frame = Border::new();
+    feed_frame.set_background(Some(ui_kit::brush(ui_kit::CARD)));
+    feed_frame.set_border_brush(Some(ui_kit::brush(ui_kit::STROKE)));
+    feed_frame.set_border_thickness(Thickness::uniform(1.0));
+    feed_frame.set_corner_radius(CornerRadius::uniform(10.0));
+    feed_frame.set_padding(Thickness::uniform(8.0));
+    feed_frame.set_margin(Thickness {
+        left: 14.0,
+        top: 10.0,
+        right: 14.0,
+        bottom: 0.0,
+    });
+    feed_frame.set_child(&message_list);
+
+    let composer_frame = Border::new();
+    composer_frame.set_padding(Thickness {
+        left: 14.0,
+        top: 8.0,
+        right: 14.0,
+        bottom: 12.0,
+    });
+    composer_frame.set_child(&composer_row);
+
+    let centre = Grid::new();
+    centre.set_row_definitions(RowDefinitions::from_items([
+        RowDefinition::with_height(GridLength::AUTO),
+        RowDefinition::with_height(GridLength::AUTO),
+        RowDefinition::with_height(GridLength::new(1.0, GridUnitType::Star)),
+        RowDefinition::with_height(GridLength::AUTO),
+    ]));
+    Grid::set_row(&header_frame, 0);
+    Grid::set_row(&stage_frame, 1);
+    Grid::set_row(&feed_frame, 2);
+    Grid::set_row(&composer_frame, 3);
+    centre.children().add(&header_frame);
+    centre.children().add(&stage_frame);
+    centre.children().add(&feed_frame);
+    centre.children().add(&composer_frame);
+
+    // ---- right rail: voice, files, sharing, about ----
+    let voice_panel = StackPanel::new();
+    voice_panel.set_spacing(8.0);
+    voice_panel.children().add(ui_kit::section_label("VOICE"));
+    voice_panel.children().add(&voice_status);
+    let voice_buttons = ui_kit::row(6.0);
+    voice_buttons.children().add(&mute_mic);
+    voice_buttons.children().add(&mute_speaker);
+    voice_panel.children().add(&voice_buttons);
+
+    let share_panel = StackPanel::new();
+    share_panel.set_spacing(8.0);
+    share_panel.children().add(ui_kit::section_label("SHARING"));
+    share_panel.children().add(&share_row);
+    share_panel.children().add(&control_row);
+
+    let about_panel = StackPanel::new();
+    about_panel.set_spacing(8.0);
+    about_panel.children().add(ui_kit::section_label("ABOUT"));
+    about_panel.children().add(&update_row);
+
+    let rail = StackPanel::new();
+    rail.set_spacing(10.0);
+    rail.children().add(ui_kit::card(&voice_panel, 12.0));
+    let file_card = ui_kit::card(&file_panel, 12.0);
+    rail.children().add(&file_card);
+    let share_card = ui_kit::card(&share_panel, 12.0);
+    rail.children().add(&share_card);
+    rail.children().add(ui_kit::card(&about_panel, 12.0));
+    let rail_frame = Border::new();
+    rail_frame.set_background(Some(ui_kit::brush(ui_kit::RAIL)));
+    rail_frame.set_padding(Thickness {
+        left: 12.0,
+        top: 12.0,
+        right: 12.0,
+        bottom: 12.0,
+    });
+    rail_frame.set_border_brush(Some(ui_kit::brush(ui_kit::STROKE)));
+    rail_frame.set_border_thickness(Thickness {
+        left: 1.0,
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+    });
+    rail_frame.set_child(&rail);
+
+    let room_view = Grid::new();
+    room_view.set_column_definitions(ColumnDefinitions::from_items([
+        ColumnDefinition::with_width(GridLength::new(236.0, GridUnitType::Pixel)),
+        ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+        ColumnDefinition::with_width(GridLength::new(284.0, GridUnitType::Pixel)),
+    ]));
+    Grid::set_column(&sidebar_frame, 0);
+    Grid::set_column(&centre, 1);
+    Grid::set_column(&rail_frame, 2);
+    room_view.children().add(&sidebar_frame);
+    room_view.children().add(&centre);
+    room_view.children().add(&rail_frame);
+    room_view.set_is_visible(false);
+
+    let root = Grid::new();
     root.set_horizontal_alignment(HorizontalAlignment::Stretch);
     root.set_vertical_alignment(VerticalAlignment::Stretch);
+    root.set_background(Some(ui_kit::brush(ui_kit::BG)));
     root.children().add(connect_panel.clone());
-    root.children().add(room_panel.clone());
+    root.children().add(room_view.clone());
     root.children().add(settings_screen.panel.clone());
-    root.children().add(error_text.clone());
-    root.children().add(update_row);
 
     let file_prefs = FilePrefs::new(
         settings.downloads_dir.as_ref().map(PathBuf::from),
@@ -1754,7 +1948,13 @@ fn create_main_window() -> Ref<Window> {
         runtime: startup.runtime,
         settings: RefCell::new(settings.clone()),
         connect_panel,
-        room_panel,
+        room_view: room_view.clone(),
+        stage_frame: stage_frame.clone(),
+        file_card: file_card.clone(),
+        share_card: share_card.clone(),
+        server_line: server_line.clone(),
+        settings_nav: settings_nav_button.clone(),
+        disconnect_nav: disconnect_nav_button.clone(),
         host,
         port,
         name,
@@ -1767,7 +1967,8 @@ fn create_main_window() -> Ref<Window> {
         trust_text,
         room_title,
         room_status,
-        members,
+        members_panel,
+        members_sig: RefCell::new(String::new()),
         rooms_panel,
         message_model,
         composer,
@@ -2143,6 +2344,23 @@ fn wire(ui: &Rc<Ui>) {
             }
         });
     }
+    ui.settings_nav.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_settings_visible(true);
+            }
+        }
+    });
+    ui.disconnect_nav.click({
+        let weak = Rc::downgrade(ui);
+        move |_, _| {
+            if let Some(ui) = weak.upgrade() {
+                ui.leave_voice(Some("voice: disconnected"));
+                let _ = ui.client.disconnect();
+            }
+        }
+    });
     screen.close.click({
         let weak = Rc::downgrade(ui);
         move |_, _| {
@@ -2350,7 +2568,7 @@ fn refresh(ui: &Rc<Ui>) {
     let snapshot = ui.client.snapshot();
     let room_visible = snapshot.room.is_some();
     let settings_open = ui.settings_screen.visible.get();
-    ui.room_panel.set_is_visible(room_visible && !settings_open);
+    ui.room_view.set_is_visible(room_visible && !settings_open);
     ui.connect_panel
         .set_is_visible(!room_visible && !settings_open);
     ui.settings_screen.panel.set_is_visible(settings_open);
@@ -2413,6 +2631,7 @@ fn refresh(ui: &Rc<Ui>) {
             .iter()
             .any(|member| member.sharing && member.session_id != room.self_member.session_id);
         render_video(ui, presenting);
+        ui.stage_frame.set_is_visible(presenting);
         let title = format!(
             "# {}   ·   {} member{}",
             room.room.name,
@@ -2427,6 +2646,16 @@ fn refresh(ui: &Rc<Ui>) {
             _ => snapshot.connection.label(),
         };
         ui.room_status.set_text(Some(&connection));
+        let endpoint = {
+            let settings = ui.settings.borrow();
+            match snapshot.latency_ms {
+                Some(latency) if snapshot.connection.is_ready() => {
+                    format!("{}:{} · {latency} ms", settings.host, settings.port)
+                }
+                _ => format!("{}:{}", settings.host, settings.port),
+            }
+        };
+        ui.server_line.set_text(Some(&endpoint));
 
         let levels = ui
             .voice
@@ -2440,35 +2669,94 @@ fn refresh(ui: &Rc<Ui>) {
             .as_ref()
             .map(|runtime| runtime.stats.borrow().clone())
             .unwrap_or_default();
-        let mut members = String::new();
+        let mut member_rows: Vec<Ref<StackPanel>> = Vec::new();
         for member in &room.members {
-            if !members.is_empty() {
-                members.push_str("   ·   ");
-            }
-            members.push_str(&member.name);
             let is_self = member.session_id == room.self_member.session_id;
+            let initial = member
+                .name
+                .chars()
+                .next()
+                .map(|ch| ch.to_uppercase().to_string())
+                .unwrap_or_else(|| "?".to_owned());
+            let avatar = Border::new();
+            avatar.set_width(24.0);
+            avatar.set_height(24.0);
+            avatar.set_background(Some(ui_kit::brush(if is_self {
+                0xFFD9_E7F5
+            } else {
+                0xFFE8_EEF5
+            })));
+            avatar.set_corner_radius(CornerRadius::uniform(12.0));
+            let initial_text = ui_kit::body(&initial, 11.0);
+            initial_text.set_horizontal_alignment(HorizontalAlignment::Center);
+            initial_text.set_vertical_alignment(VerticalAlignment::Center);
+            avatar.set_child(&initial_text);
+
+            let mut name = member.name.clone();
             if is_self {
-                members.push_str(" (you)");
+                name.push_str(" (you)");
             }
+            let name_text = ui_kit::body(&name, 12.5);
+
+            let states = ui_kit::row(4.0);
             if member.self_mute {
-                members.push_str(" [muted]");
+                states
+                    .children()
+                    .add(icons::icon(icons::Icon::MicrophoneOff, 13.0));
             }
             if member.sharing {
-                members.push_str(" [presenting]");
+                states
+                    .children()
+                    .add(icons::icon(icons::Icon::ShareScreen, 13.0));
             }
             if member.voice {
-                members.push_str(" [voice]");
+                states
+                    .children()
+                    .add(icons::icon(icons::Icon::Microphone, 13.0));
             }
             if let Some(label) = stats.get(&member.session_id)
                 && !label.is_empty()
             {
-                members.push_str(&format!(" ({label})"));
+                states.children().add(ui_kit::muted(label, 10.5));
             }
             if speaking(&levels, if is_self { "" } else { &member.session_id }) {
-                members.push_str(" \u{266a}");
+                states.children().add(ui_kit::muted("\u{266A}", 12.0));
+            }
+
+            let row_grid = Grid::new();
+            row_grid.set_column_definitions(ColumnDefinitions::from_items([
+                ColumnDefinition::with_width(GridLength::AUTO),
+                ColumnDefinition::with_width(GridLength::new(1.0, GridUnitType::Star)),
+                ColumnDefinition::with_width(GridLength::AUTO),
+            ]));
+            Grid::set_column(&avatar, 0);
+            Grid::set_column(&name_text, 1);
+            Grid::set_column(&states, 2);
+            row_grid.children().add(&avatar);
+            row_grid.children().add(&name_text);
+            row_grid.children().add(&states);
+            let row_panel = StackPanel::new();
+            row_panel.children().add(&row_grid);
+            member_rows.push(row_panel);
+        }
+        let members_signature = room
+            .members
+            .iter()
+            .map(|member| {
+                format!(
+                    "{}:{}:{}:{}:{}",
+                    member.session_id, member.name, member.self_mute, member.sharing, member.voice
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        if *ui.members_sig.borrow() != members_signature {
+            *ui.members_sig.borrow_mut() = members_signature;
+            ui.members_panel.children().clear();
+            for row in &member_rows {
+                ui.members_panel.children().add(row);
             }
         }
-        ui.members.set_text(Some(&members));
 
         let rooms_signature = snapshot
             .rooms
@@ -2769,6 +3057,8 @@ fn refresh_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
     ui.share_source.set_is_visible(active);
     ui.share_quality.set_is_visible(active);
     ui.file_panel.set_is_visible(active);
+    ui.file_card.set_is_visible(active);
+    ui.share_card.set_is_visible(active);
     if active {
         ui.refresh_file_members(room);
     }
