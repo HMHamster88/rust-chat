@@ -688,6 +688,14 @@ pub(crate) fn create_main_window() -> Ref<Window> {
         voice_wanted: Cell::new(false),
         voice_room_id: RefCell::new(None),
         voice: RefCell::new(None),
+        smoke_voice: Cell::new((
+            0,
+            std::env::var("RUST_CHAT_SMOKE_VOICE")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0),
+        )),
+        smoke_voice_deadline: Cell::new(None),
         settings_screen,
         file_prefs,
     });

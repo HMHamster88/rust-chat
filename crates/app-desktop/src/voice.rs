@@ -1904,11 +1904,21 @@ async fn share_task(
                         }
                     }
                 }
-                Some(ShareCommand::Stop) | None => {
+                Some(ShareCommand::Stop) => {
                     if let Some(mut old) = capture.take() {
                         old.stop();
                     }
                     encoder = None;
+                }
+                // The controller is gone: stop capturing and end the task instead of spinning
+                // on a closed channel.
+                // The controller is gone: stop capturing and end the task instead of spinning
+                // on a closed channel.
+                None => {
+                    if let Some(mut old) = capture.take() {
+                        old.stop();
+                    }
+                    break;
                 }
             },
             frame = capture_rx.recv() => {

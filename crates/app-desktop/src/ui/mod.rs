@@ -221,6 +221,9 @@ struct Ui {
     pub(crate) voice_wanted: Cell<bool>,
     pub(crate) voice_room_id: RefCell<Option<String>>,
     pub(crate) voice: RefCell<Option<VoiceRuntime>>,
+    /// Scripted voice join/leave for tests: (phase, seconds in voice, deadline).
+    pub(crate) smoke_voice: std::cell::Cell<(u8, u64)>,
+    pub(crate) smoke_voice_deadline: Cell<Option<Instant>>,
     pub(crate) settings_screen: SettingsScreen,
     pub(crate) file_prefs: std::sync::Arc<FilePrefs>,
 }

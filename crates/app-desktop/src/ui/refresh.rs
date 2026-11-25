@@ -29,8 +29,36 @@ pub(super) fn smoke_request(settings: &ClientSettings) -> Option<ConnectRequest>
     })
 }
 
+/// Test hook: `RUST_CHAT_SMOKE_VOICE=<seconds>` joins voice once the room is open and leaves
+/// after that many seconds, so UI measurements never depend on synthetic clicks.
+fn drive_smoke_voice(ui: &Rc<Ui>, snapshot: &ChatSnapshot) {
+    let (phase, seconds) = ui.smoke_voice.get();
+    if seconds == 0 {
+        return;
+    }
+    match phase {
+        0 => {
+            if snapshot.room.is_some() {
+                ui.join_voice();
+                ui.smoke_voice.set((1, seconds));
+                ui.smoke_voice_deadline
+                    .set(Some(Instant::now() + Duration::from_secs(seconds)));
+            }
+        }
+        1 => {
+            let deadline = ui.smoke_voice_deadline.get();
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                ui.leave_voice(Some("smoke: left voice"));
+                ui.smoke_voice.set((2, seconds));
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn refresh(ui: &Rc<Ui>) {
     let snapshot = ui.client.snapshot();
+    drive_smoke_voice(ui, &snapshot);
     let room_visible = snapshot.room.is_some();
     let settings_open = ui.settings_screen.visible.get();
     ui.room_view.set_is_visible(room_visible && !settings_open);
