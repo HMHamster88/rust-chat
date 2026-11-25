@@ -3,6 +3,9 @@
 #![cfg(windows)]
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod icons;
+mod ui_kit;
+
 use ferroui_base::collections::FerroList;
 use ferroui_base::input::{
     InputElement, Key, KeyEventArgs, PointerEventArgs, PointerPressedEventArgs,
@@ -1217,8 +1220,11 @@ fn checkbox(label: &str, checked: bool) -> Ref<CheckBox> {
     box_
 }
 
-fn section(panel: &Ref<StackPanel>, title: &str) {
-    panel.children().add(text(title, 12.0));
+fn section(panel: &Ref<StackPanel>, glyph: icons::Icon, title: &str) {
+    let row = ui_kit::row(7.0);
+    row.children().add(icons::icon(glyph, 14.0));
+    row.children().add(ui_kit::section_label(title));
+    panel.children().add(row);
 }
 
 fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
@@ -1236,9 +1242,9 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     panel.set_content(Some(Control::boxed(panel_content.clone())));
     panel.set_is_visible(false);
 
-    let open_room = small_button("Settings");
-    let open_connect = small_button("Settings");
-    let close = small_button("Close");
+    let open_room = icons::icon_button(icons::Icon::Settings, "Settings");
+    let open_connect = icons::icon_button(icons::Icon::Settings, "Settings");
+    let close = icons::icon_button(icons::Icon::Close, "Close settings");
     let title_row = row();
     title_row.children().add(text("SETTINGS", 22.0));
     title_row.children().add(close.clone());
@@ -1246,12 +1252,12 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     let status = text("", 12.0);
 
     let auto_connect = checkbox("Connect automatically on start", settings.auto_connect);
-    let forget_pin = small_button("Forget pinned key");
+    let forget_pin = icons::icon_button(icons::Icon::Shield, "Forget pinned key");
 
     let timestamps = checkbox("Show timestamps", settings.show_timestamps);
     let clock24 = checkbox("24-hour clock", settings.clock_24h);
     let keep_history = checkbox("Keep history on disk", settings.keep_history);
-    let clear_history = small_button("Clear local history");
+    let clear_history = icons::icon_button(icons::Icon::Delete, "Clear local history");
 
     let mic = small_button("Microphone: system default");
     let speaker = small_button("Speakers: system default");
@@ -1259,7 +1265,8 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
 
     let downloads = text("", 12.0);
     let choose_downloads = small_button("Choose…");
-    let reset_downloads = small_button("Use Downloads");
+    let reset_downloads =
+        icons::icon_button(icons::Icon::Restart, "Use the default Downloads folder");
     let downloads_row = row();
     downloads_row.children().add(choose_downloads.clone());
     downloads_row.children().add(reset_downloads.clone());
@@ -1272,8 +1279,8 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     let about_data = text("", 12.0);
 
     let confirm_text = text("", 13.0);
-    let confirm = small_button("Confirm");
-    let cancel = small_button("Cancel");
+    let confirm = icons::icon_button(icons::Icon::Check, "Confirm");
+    let cancel = icons::icon_button(icons::Icon::Close, "Cancel");
     confirm.set_is_visible(false);
     cancel.set_is_visible(false);
     let confirm_row = row();
@@ -1284,13 +1291,13 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     panel_content.children().add(title_row);
     panel_content.children().add(status.clone());
 
-    section(&panel_content, "CONNECTION");
+    section(&panel_content, icons::Icon::Server, "CONNECTION");
     panel_content.children().add(auto_connect.clone());
     let connection_row = row();
     connection_row.children().add(forget_pin.clone());
     panel_content.children().add(connection_row);
 
-    section(&panel_content, "CHAT");
+    section(&panel_content, icons::Icon::Chat, "CHAT");
     panel_content.children().add(timestamps.clone());
     panel_content.children().add(clock24.clone());
     panel_content.children().add(keep_history.clone());
@@ -1298,7 +1305,7 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
     chat_row.children().add(clear_history.clone());
     panel_content.children().add(chat_row);
 
-    section(&panel_content, "AUDIO");
+    section(&panel_content, icons::Icon::Microphone, "AUDIO");
     let audio_row = row();
     audio_row.children().add(mic.clone());
     audio_row.children().add(speaker.clone());
@@ -1307,17 +1314,17 @@ fn build_settings_screen(settings: &ClientSettings) -> SettingsScreen {
         .children()
         .add(text("Devices apply the next time you join voice.", 12.0));
 
-    section(&panel_content, "SCREEN SHARING");
+    section(&panel_content, icons::Icon::ShareScreen, "SCREEN SHARING");
     let quality_row = row();
     quality_row.children().add(quality.clone());
     panel_content.children().add(quality_row);
 
-    section(&panel_content, "FILES");
+    section(&panel_content, icons::Icon::Folder, "FILES");
     panel_content.children().add(downloads.clone());
     panel_content.children().add(downloads_row);
     panel_content.children().add(open_when_finished.clone());
 
-    section(&panel_content, "ABOUT");
+    section(&panel_content, icons::Icon::Info, "ABOUT");
     panel_content.children().add(about_version.clone());
     panel_content.children().add(about_data.clone());
 
@@ -1495,16 +1502,13 @@ fn create_main_window() -> Ref<Window> {
 
     let connect_button = Button::new();
     connect_button.set_content(Some(Rc::new("Connect".to_string())));
-    let forget = Button::new();
-    forget.set_content(Some(Rc::new("Forget pinned key".to_string())));
+    let forget = icons::icon_button(icons::Icon::Shield, "Forget pinned key");
     let connect_status = text("not connected", 14.0);
     let error_text = text("", 13.0);
 
     let update_status = text("", 12.0);
-    let update_check = Button::new();
-    update_check.set_content(Some(Rc::new("Check for updates".to_string())));
-    let update_open = Button::new();
-    update_open.set_content(Some(Rc::new("Open release".to_string())));
+    let update_check = icons::icon_button(icons::Icon::Restart, "Check for updates");
+    let update_open = icons::icon_button(icons::Icon::OpenExternal, "Open release");
     update_open.set_is_visible(false);
     let update_auto = CheckBox::new();
     update_auto.set_content(Some(Rc::new("Check at startup".to_string())));
@@ -1570,16 +1574,11 @@ fn create_main_window() -> Ref<Window> {
     let members = text("", 13.0);
     let rooms_panel = StackPanel::new();
     rooms_panel.set_spacing(4.0);
-    let join_voice = Button::new();
-    join_voice.set_content(Some(Rc::new("Join voice".to_string())));
-    let leave_voice = Button::new();
-    leave_voice.set_content(Some(Rc::new("Leave voice".to_string())));
-    let mute_mic = Button::new();
-    mute_mic.set_content(Some(Rc::new("Unmute mic".to_string())));
-    let mute_speaker = Button::new();
-    mute_speaker.set_content(Some(Rc::new("Mute speakers".to_string())));
-    let share = Button::new();
-    share.set_content(Some(Rc::new("Share screen".to_string())));
+    let join_voice = icons::icon_button(icons::Icon::Microphone, "Join voice");
+    let leave_voice = icons::icon_button(icons::Icon::Disconnect, "Leave voice");
+    let mute_mic = icons::icon_button(icons::Icon::MicrophoneOff, "Mute microphone");
+    let mute_speaker = icons::icon_button(icons::Icon::Speaker, "Mute speakers");
+    let share = icons::icon_button(icons::Icon::ShareScreen, "Share screen");
     let share_sources = enumerate_sources();
     let share_source_index = settings
         .share_source
@@ -1610,17 +1609,13 @@ fn create_main_window() -> Ref<Window> {
     let share_row = row();
     share_row.children().add(share_source.clone());
     share_row.children().add(share_quality.clone());
-    let request_control = Button::new();
-    request_control.set_content(Some(Rc::new("Request control".to_string())));
+    let request_control = icons::icon_button(icons::Icon::RemoteControl, "Request remote control");
     request_control.set_is_visible(false);
-    let stop_control = Button::new();
-    stop_control.set_content(Some(Rc::new("Stop control".to_string())));
+    let stop_control = icons::icon_button(icons::Icon::Close, "Stop remote control");
     stop_control.set_is_visible(false);
-    let allow_control = Button::new();
-    allow_control.set_content(Some(Rc::new("Allow 30 min".to_string())));
+    let allow_control = icons::icon_button(icons::Icon::Check, "Allow remote control");
     allow_control.set_is_visible(false);
-    let deny_control = Button::new();
-    deny_control.set_content(Some(Rc::new("Deny".to_string())));
+    let deny_control = icons::icon_button(icons::Icon::Close, "Deny remote control");
     deny_control.set_is_visible(false);
     let control_status = text("", 13.0);
     let control_row = row();
@@ -1663,8 +1658,7 @@ fn create_main_window() -> Ref<Window> {
     let composer = TextBox::new();
     composer.set_accepts_return(false);
     composer.set_width(760.0);
-    let send = Button::new();
-    send.set_content(Some(Rc::new("Send".to_string())));
+    let send = icons::icon_button(icons::Icon::Send, "Send message");
     let composer_row = row();
     composer_row.children().add(composer.clone());
     composer_row.children().add(send.clone());
@@ -1676,20 +1670,16 @@ fn create_main_window() -> Ref<Window> {
     file_path.set_width(420.0);
     let file_caption = TextBox::new();
     file_caption.set_width(160.0);
-    let file_choose = Button::new();
-    file_choose.set_content(Some(Rc::new("Choose…".to_string())));
-    let file_send = Button::new();
-    file_send.set_content(Some(Rc::new("Send file".to_string())));
+    let file_choose = icons::icon_button(icons::Icon::Attach, "Choose a file");
+    let file_send = icons::icon_button(icons::Icon::Upload, "Send file");
     let file_row = row();
     file_row.children().add(file_choose.clone());
     file_row.children().add(file_path.clone());
     file_row.children().add(file_caption.clone());
     file_row.children().add(file_send.clone());
     let file_offer_text = text("", 13.0);
-    let file_accept = Button::new();
-    file_accept.set_content(Some(Rc::new("Accept".to_string())));
-    let file_decline = Button::new();
-    file_decline.set_content(Some(Rc::new("Decline".to_string())));
+    let file_accept = icons::icon_button(icons::Icon::Check, "Accept file");
+    let file_decline = icons::icon_button(icons::Icon::Close, "Decline file");
     let file_offer_actions = row();
     file_offer_actions.children().add(file_accept.clone());
     file_offer_actions.children().add(file_decline.clone());
@@ -1699,11 +1689,9 @@ fn create_main_window() -> Ref<Window> {
     file_offer_panel.children().add(file_offer_actions);
     file_offer_panel.set_is_visible(false);
     let file_status = text("", 13.0);
-    let file_cancel = Button::new();
-    file_cancel.set_content(Some(Rc::new("Cancel".to_string())));
+    let file_cancel = icons::icon_button(icons::Icon::Close, "Cancel transfer");
     file_cancel.set_is_visible(false);
-    let file_open = Button::new();
-    file_open.set_content(Some(Rc::new("Open".to_string())));
+    let file_open = icons::icon_button(icons::Icon::Download, "Open received file");
     file_open.set_is_visible(false);
     let file_actions = row();
     file_actions.children().add(file_cancel.clone());
@@ -1718,8 +1706,7 @@ fn create_main_window() -> Ref<Window> {
     file_panel.children().add(file_actions);
     file_panel.set_is_visible(false);
 
-    let disconnect = Button::new();
-    disconnect.set_content(Some(Rc::new("Disconnect".to_string())));
+    let disconnect = icons::icon_button(icons::Icon::Disconnect, "Disconnect");
     let room_actions = row();
     room_actions.children().add(disconnect.clone());
     room_actions
